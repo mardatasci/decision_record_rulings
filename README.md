@@ -39,7 +39,7 @@ Each guide covers the file layout, the ruling format and its fields, the validit
 
 This system grew out of the decision rulings in [Task Coach](https://github.com/taskcoach/taskcoach)'s [`docs/DEVELOPMENT.md`](https://github.com/taskcoach/taskcoach/blob/master/docs/DEVELOPMENT.md), shown to me by [Réal Carbonneau](https://github.com/realcarbonneau). Task Coach records decisions inline as "ruled by the decider" with a date; this repo builds on that with IDs, area docs, replacement links, a schema and a CI checker.
 
-It also borrows the ADR idea from Michael Nygard, the stable IDs and validator from [Agent Decision Records](https://github.com/me2resh/agent-decision-record), and the idea that each rule names the files it applies to from Actual AI's "agent-optimized ADRs".
+It also borrows the ADR idea from Michael Nygard's ["Documenting Architecture Decisions"](https://www.cognitect.com/blog/2011/11/15/documenting-architecture-decisions) (2011), the stable IDs and validator from [Agent Decision Records](https://github.com/me2resh/agent-decision-record) by me2resh (ideas adapted; AgDR is licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), and the idea that each rule names the files it applies to from Actual AI's ["ADRs for Coding Agents: Architectural Context, Optimized"](https://actual.ai/blog/agent-optimized-adrs).
 
 ## License
 

@@ -14,7 +14,7 @@
   - A checker runs in CI, so a broken or invented ruling fails the build.
 
   It borrows the ADR idea (Nygard), the stable IDs and validator from Agent Decision Records
-  (github.com/me2resh/agent-decision-record), and the idea that each rule names the files it applies to from Actual AI's
+  ([github.com/me2resh/agent-decision-record](https://github.com/me2resh/agent-decision-record)), and the idea that each rule names the files it applies to from Actual AI's
   "agent-optimized ADRs".
 
   File layout
