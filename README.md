@@ -37,4 +37,6 @@ Each guide covers the file layout, the ruling format and its fields, the validit
 
 ## Credits
 
-It borrows the ADR idea from Michael Nygard, the stable IDs and validator from [Agent Decision Records](https://github.com/me2resh/agent-decision-record), and the idea that each rule names the files it applies to from Actual AI's "agent-optimized ADRs".
+This system was inspired by [Task Coach](https://github.com/taskcoach/taskcoach), the free, open-source task manager.
+
+It also borrows the ADR idea from Michael Nygard, the stable IDs and validator from [Agent Decision Records](https://github.com/me2resh/agent-decision-record), and the idea that each rule names the files it applies to from Actual AI's "agent-optimized ADRs".
