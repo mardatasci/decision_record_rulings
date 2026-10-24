@@ -18,8 +18,8 @@ docs/README.md                   # index of every area doc
 docs/development.md              # cross-cutting rulings + the ruling format
 docs/<area>.md                   # one doc per area: ai.md, billing.md, security.md, ui.md …
 docs/rulings.schema.json         # machine-readable schema + the fixed list of areas
-scripts/check-rulings.mjs        # the checker
-tests/checkRulings.test.js       # its tests (on sample docs, not the real ones)
+scripts/check_rulings.py         # the checker
+tests/test_check_rulings.py      # its tests (on sample docs, not the real ones)
 ```
 
 ## How Codex finds the rulings
@@ -149,7 +149,7 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 
 ## The checker
 
-`node scripts/check-rulings.mjs`, run as `npm run check:rulings`:
+`python3 scripts/check_rulings.py` (Python 3.8 or later, standard library only):
 
 - Reads every docs/*.md except README.md, skipping code blocks.
 - Pulls out each ruling, from its bold lead-in to the next blank line, list item, heading or lead-in, and splits it into the fields.
@@ -157,17 +157,17 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 - --json prints the extracted rulings, which match the schema.
 - Has its own tests that run against sample doc folders, never the real docs.
 
-A reference implementation is in `reference/` of the owner-rulings repo; copy `scripts/check-rulings.mjs` and its tests rather than writing your own, then change the area list in the schema.
+A reference implementation is in `reference/` of the owner-rulings repo; copy `scripts/check_rulings.py` and its tests rather than writing your own, then change the area list in the schema.
 
 In CI it's its own step, at the end of the job, so it always runs and never hides other checks:
 
 ```yaml
 - name: Owner rulings are well-formed
   if: ${{ !cancelled() }}
-  run: npm run check:rulings
+  run: python3 scripts/check_rulings.py
 ```
 
-It is deliberately not in the main npm run check, which also gates deploys; a typo in a doc shouldn't block a production deploy.
+The step needs Python; GitHub-hosted runners already have it. It is deliberately not in the repo's main check, which also gates deploys; a typo in a doc shouldn't block a production deploy.
 
 ## Recording a new ruling
 
@@ -182,7 +182,7 @@ The procedure:
 5. Write it in the owner's words. Add Why, Covers, Paths or Tests only if the owner gave them or they've been checked.
 6. Replacements. Link both ways. Never delete or reword the old ruling.
 7. Other statements the ruling makes wrong. List them and ask before marking each one "Replaced →".
-8. Check. Run npm run check:rulings and show the owner the result.
+8. Check. Run python3 scripts/check_rulings.py and show the owner the result.
 9. Stop. Never commit unless asked.
 
 Only the owner makes rulings. A worker's proposal never becomes a ruling, and "the owner doesn't remember" never means "parked".

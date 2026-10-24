@@ -17,8 +17,8 @@ docs/README.md                   # index of every area doc
 docs/development.md              # cross-cutting rulings + the ruling format
 docs/<area>.md                   # one doc per area: ai.md, billing.md, security.md, ui.md …
 docs/rulings.schema.json         # machine-readable schema + the fixed list of areas
-scripts/check-rulings.mjs        # the checker
-tests/checkRulings.test.js       # its tests (on sample docs, not the real ones)
+scripts/check_rulings.py         # the checker
+tests/test_check_rulings.py      # its tests (on sample docs, not the real ones)
 .claude/skills/ruling/SKILL.md   # /ruling: how Claude records a new ruling
 ```
 
@@ -146,7 +146,7 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 
 ## The checker
 
-`node scripts/check-rulings.mjs`, run as `npm run check:rulings`:
+`python3 scripts/check_rulings.py` (Python 3.8 or later, standard library only):
 
 - Reads every docs/*.md except README.md, skipping code blocks.
 - Pulls out each ruling, from its bold lead-in to the next blank line, list item, heading or lead-in, and splits it into the fields.
@@ -154,17 +154,17 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 - --json prints the extracted rulings, which match the schema.
 - Has its own tests that run against sample doc folders, never the real docs.
 
-A reference implementation is in `reference/` of the owner-rulings repo; copy `scripts/check-rulings.mjs` and its tests rather than writing your own, then change the area list in the schema.
+A reference implementation is in `reference/` of the owner-rulings repo; copy `scripts/check_rulings.py` and its tests rather than writing your own, then change the area list in the schema.
 
 In CI it's its own step, at the end of the job, so it always runs and never hides other checks:
 
 ```yaml
 - name: Owner rulings are well-formed
   if: ${{ !cancelled() }}
-  run: npm run check:rulings
+  run: python3 scripts/check_rulings.py
 ```
 
-It is deliberately not in the main npm run check, which also gates deploys; a typo in a doc shouldn't block a production deploy.
+The step needs Python; GitHub-hosted runners already have it. It is deliberately not in the repo's main check, which also gates deploys; a typo in a doc shouldn't block a production deploy.
 
 ## Recording a new ruling: the /ruling skill
 
@@ -206,7 +206,7 @@ parks, and says so explicitly.
    the owner didn't mention, stop and ask.
 7. Search docs/ for other statements it makes wrong; list them and ask
    before marking each one "Replaced →". Never delete.
-8. Run `npm run check:rulings`, fix only what you wrote, show the output.
+8. Run `python3 scripts/check_rulings.py`, fix only what you wrote, show the output.
 9. Stop. Do not commit unless the owner asks.
 ```
 
@@ -225,7 +225,7 @@ Set up owner rulings in this repo as described in the attached write-up. Work on
 2. Create docs/README.md, docs/development.md (the ruling format and the cross-cutting rulings) and one docs/<area>.md per area, and propose the area list to me.
 3. Write each decision I confirm as a ruling with an ID. Mark outdated statements "Replaced →"; never delete.
 4. Make CLAUDE.md short: @docs/development.md plus a "Never miss these" list.
-5. Add docs/rulings.schema.json, scripts/check-rulings.mjs with tests on sample docs only, and an npm run check:rulings script.
+5. Add docs/rulings.schema.json, scripts/check_rulings.py with tests on sample docs only.
 6. Add the checker to CI as its own last step with if: ${{ !cancelled() }}, not inside the deploy gate.
 7. Create the /ruling skill in .claude/skills/ruling/SKILL.md.
 
