@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Owner ruling",
+  "x-areas": {
+    "BILLING": "docs/billing.md",
+    "DEV": "docs/development.md"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "date",
+    "decision",
+    "doc"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/rulingId"
+    },
+    "kind": {
+      "enum": [
+        "ruled",
+        "parked",
+        "asked"
+      ]
+    },
+    "date": {
+      "$ref": "#/$defs/date"
+    },
+    "doc": {
+      "enum": [
+        "docs/development.md"
+      ]
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "decision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "why": {
+      "type": "string",
+      "minLength": 1
+    },
+    "covers": {
+      "type": "string",
+      "minLength": 1
+    },
+    "paths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "replaces": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/rulingId"
+      }
+    },
+    "replacedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "date"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/rulingId"
+        },
+        "date": {
+          "$ref": "#/$defs/date"
+        }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "rulingId": {
+      "type": "string",
+      "pattern": "^R-(BILLING|DEV|UI)-[0-9]{3}$"
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    }
+  }
+}

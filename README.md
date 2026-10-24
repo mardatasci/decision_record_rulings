@@ -26,6 +26,7 @@ A ruling looks like this:
 | [`CODEX_RULINGS-GUIDE.md`](CODEX_RULINGS-GUIDE.md) | The same system for **Codex**: a short `AGENTS.md`, folder-level `AGENTS.md` files for high-risk folders, and the "Recording a ruling" procedure in `docs/development.md`. |
 | [`STARTER_PROMPT_CLAUDE.md`](STARTER_PROMPT_CLAUDE.md) | The prompt to paste into **Claude Code** to set this up in an existing repo, one approved step at a time. |
 | [`STARTER_PROMPT_CODEX.md`](STARTER_PROMPT_CODEX.md) | The same prompt for **Codex**. |
+| [`reference/`](reference/) | A reference checker: `scripts/check-rulings.mjs`, its schema, tests and sample docs. Copy it into your repo and change the area list. |
 
 Each guide covers the file layout, the ruling format and its fields, the validity rules the checker enforces, the JSON schema, the checker and its CI step, and the order of work for adopting it.
 
@@ -44,3 +45,5 @@ It also borrows the ADR idea from Michael Nygard's ["Documenting Architecture De
 ## License
 
 [MIT](LICENSE). Use it, copy it, adapt it and share it. Pasting a prompt or snippet into your own project needs no credit.
+
+The reference checker in `reference/` is provided as is, without warranty of any kind. Review it and use it at your own discretion and risk; I'm not responsible for any outcome of using it.
