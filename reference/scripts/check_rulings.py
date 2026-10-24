@@ -8,15 +8,18 @@
 # Usage:
 #   python3 scripts/check_rulings.py [--root <dir>] [--json]
 #
-#   --root <dir>  Repo root (default: current directory). docs/, the schema
-#                 docs/rulings.schema.json, package.json, and every Paths/Tests
-#                 entry are resolved against it. The tests use it to point the
-#                 checker at sample repos in tests/fixtures/.
+#   --root <dir>  Repo root (default: current directory). docs/ and the schema
+#                 docs/rulings.schema.json are read from it; nothing else is.
+#                 The tests use it to point the checker at sample repos in
+#                 tests/fixtures/.
 #   --json        Print the extracted rulings as a JSON array matching the
 #                 schema on stdout. Problems and the summary go to stderr.
 #
 # Prints one line per problem, `docs/x.md:LINE  R-ID  message`, then
 # `N rulings in M docs, E errors`. Exits 1 if there are errors, else 0.
+#
+# The checker checks the format of rulings only. Paths and Tests items are text:
+# it never checks that the files they name exist.
 #
 # Zero dependencies: Python 3.8+ standard library only.
 
@@ -33,7 +36,6 @@ from decimal import Decimal
 SCHEMA_PATH = 'docs/rulings.schema.json'
 FIELDS = ['Why', 'Covers', 'Paths', 'Replaces', 'Tests']
 KINDS = {'Ruled': 'ruled', 'Parked': 'parked', 'Asked': 'asked'}
-SKIP_DIRS = {'.git', 'node_modules'}
 
 # Regexes keep the semantics of the original ECMAScript ones: \d, \b and /i are
 # ASCII-only, "\s" is ECMAScript white space, "." stops at any line terminator,
@@ -83,8 +85,6 @@ AND_RE = re.compile(r'\band\b', _A)
 REPLACES_SPLIT_RE = re.compile(r'[' + WSC + r',;]+', _A)
 TRAILING_DOT_RE = re.compile(r'\.\Z', _A)
 LEFTOVER_RE = re.compile(r'[,;.' + WSC + r']', _A)
-NPM_RE = re.compile(r'^npm\b', _A)
-NPM_RUN_RE = re.compile(r'^npm run (' + NWS + r'+)\Z', _A)
 DRIVE_RE = re.compile(r'^[A-Za-z]:', _A)
 GLOB_CHARS_RE = re.compile(r'[*?]', _A)
 GLOB_UNSUPPORTED_RE = re.compile(r'[{}[\]]', _A)
@@ -140,22 +140,6 @@ def _kind_of(word):
 
 def js_trim(s):
     return s.strip(WSC)
-
-
-def _utf16_units(s):
-    """The string as a sequence of UTF-16 code units (one char per unit)."""
-    if all(ord(c) < 0x10000 for c in s):
-        return s
-    out = []
-    for c in s:
-        o = ord(c)
-        if o >= 0x10000:
-            o -= 0x10000
-            out.append(chr(0xD800 + (o >> 10)))
-            out.append(chr(0xDC00 + (o & 0x3FF)))
-        else:
-            out.append(c)
-    return ''.join(out)
 
 
 def _utf16_key(s):
@@ -348,28 +332,6 @@ def _js_get(obj, key):
     return UNDEFINED
 
 
-def _js_truthy(v):
-    if v is None or v is UNDEFINED or v is False:
-        return False
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        return v == v and v != 0
-    if isinstance(v, str):
-        return v != ''
-    return True
-
-
-def _js_has_own(obj, key):
-    """Object.prototype.hasOwnProperty.call(obj, key) for a JSON value."""
-    if isinstance(obj, dict):
-        return key in obj
-    if isinstance(obj, (list, str)):
-        if key == 'length':
-            return True
-        n = len(obj) if isinstance(obj, list) else len(_utf16_units(obj))
-        return _is_array_index(key) and int(key) < n
-    return False
-
-
 # Node's fs error texts (libuv), for "schema is not valid JSON: <message>".
 _UV_MESSAGES = {
     'EACCES': 'permission denied',
@@ -471,22 +433,6 @@ def _normalize_string(p, allow_above_root):
     return res
 
 
-def posix_normalize(p):
-    """path.posix.normalize."""
-    if p == '':
-        return '.'
-    is_abs = p[0] == '/'
-    trailing = p[-1] == '/'
-    p = _normalize_string(p, not is_abs)
-    if p == '':
-        if is_abs:
-            return '/'
-        return './' if trailing else '.'
-    if trailing:
-        p += '/'
-    return '/' + p if is_abs else p
-
-
 def _resolve(*segments):
     """path.resolve."""
     if os.name == 'nt':
@@ -510,28 +456,6 @@ def _is_absolute(p):
     if os.name == 'nt':
         return os.path.isabs(p) or p.startswith(('/', '\\'))
     return p.startswith('/')
-
-
-def _is_outside(frm, to):
-    """True if path.relative(frm, to) leaves frm."""
-    if os.name == 'nt':
-        try:
-            rel = os.path.relpath(to, frm)
-        except ValueError:
-            return True
-        return rel == '..' or rel.startswith('..' + os.sep) or os.path.isabs(rel)
-    frm = _resolve(frm)
-    to = _resolve(to)
-    if to == frm:
-        return False
-    prefix = frm if frm.endswith('/') else frm + '/'
-    return not to.startswith(prefix)
-
-
-def _realpath(p):
-    """fs.realpathSync: raises OSError if the path (or a link in it) is missing."""
-    os.stat(p)
-    return os.path.realpath(p)
 
 
 # ---------------------------------------------------------------------------
@@ -579,53 +503,8 @@ def date_problem(date, today):
     return None
 
 
-def glob_to_regexp(glob):
-    """Converts a glob with *, ** and ? into a regex over posix relative paths (UTF-16 units)."""
-    glob = _utf16_units(glob)
-    out = []
-    i = 0
-    n = len(glob)
-    while i < n:
-        c = glob[i]
-        if c == '*':
-            if i + 1 < n and glob[i + 1] == '*':
-                # "**/" matches zero or more whole segments; a trailing "**" matches anything.
-                if i + 2 < n and glob[i + 2] == '/':
-                    out.append('(?:[^/]+/)*')
-                    i += 2
-                else:
-                    out.append(DOT + '*')
-                    i += 1
-            else:
-                out.append('[^/]*')
-        elif c == '?':
-            out.append('[^/]')
-        else:
-            out.append(re.escape(c))
-        i += 1
-    return re.compile('^' + ''.join(out) + r'\Z')
-
-
 def is_glob(p):
     return bool(GLOB_CHARS_RE.search(p))
-
-
-def list_files(root):
-    """Lists every file under root as posix relative paths (skips .git, node_modules)."""
-    out = []
-
-    def walk(d, rel):
-        for name, ent in _scandir_sorted(d):
-            if name in SKIP_DIRS:
-                continue
-            r = rel + '/' + name if rel else name
-            if ent.is_dir(follow_symlinks=False):
-                walk(os.path.join(d, name), r)
-            else:
-                out.append(r)
-
-    walk(root, '')
-    return out
 
 
 def backtick_items(value):
@@ -952,17 +831,8 @@ def parse_fields(ruling, body, err):
                 ruling[name.lower()] = _dedupe(non_empty) if name == 'Paths' else non_empty
 
 
-def check_path_item(root, real_root, item, field, get_files, scripts, at):
-    """Checks one Paths/Tests item against the file tree."""
-    if field == 'tests' and NPM_RE.search(item):
-        m = NPM_RUN_RE.search(item)
-        if not m:
-            at('Tests item "%s" must be a file or "npm run <script>"' % item)
-        elif scripts is None:
-            at('Tests uses "%s" but package.json is missing or unreadable' % item)
-        elif not _js_has_own(scripts, m.group(1)):
-            at('Tests uses "%s" but package.json has no "%s" script' % (item, m.group(1)))
-        return
+def check_path_item(item, field, at):
+    """Checks the text of one Paths/Tests item. Never looks at the file tree."""
     label = 'Paths' if field == 'paths' else 'Tests'
     if _is_absolute(item) or DRIVE_RE.search(item):
         at('%s item "%s" points outside the repo' % (label, item))
@@ -970,33 +840,11 @@ def check_path_item(root, real_root, item, field, get_files, scripts, at):
     if '\\' in item:
         at('%s item "%s" must use / separators' % (label, item))
         return
-
-    # Follows symlinks: an item inside the repo may still point outside it.
-    def real_outside(full):
-        try:
-            return _is_outside(real_root, _realpath(full))
-        except (OSError, ValueError):
-            return False  # broken symlink or unreadable: reported elsewhere, if at all
-
-    resolved = _resolve(root, item)
-    if _is_outside(root, resolved):
+    if '..' in item.split('/'):
         at('%s item "%s" points outside the repo' % (label, item))
         return
-    if is_glob(item):
-        if GLOB_UNSUPPORTED_RE.search(item):
-            at('%s glob "%s" uses unsupported glob syntax ({} and [] are not supported)' % (label, item))
-            return
-        rx = glob_to_regexp(posix_normalize(re.sub(r'^\./', '', item, count=1)))
-        matches = [f for f in get_files() if rx.search(_utf16_units(f))]
-        if not matches:
-            at('%s glob "%s" matches no files' % (label, item))
-        for f in matches:
-            if real_outside(os.path.join(root, f)):
-                at('%s glob "%s" matches "%s", which points outside the repo' % (label, item, f))
-    elif not os.path.exists(resolved):
-        at('%s item "%s" does not exist' % (label, item))
-    elif real_outside(resolved):
-        at('%s item "%s" points outside the repo' % (label, item))
+    if is_glob(item) and GLOB_UNSUPPORTED_RE.search(item):
+        at('%s glob "%s" uses unsupported glob syntax ({} and [] are not supported)' % (label, item))
 
 
 def check_rulings(root=None, now=None):
@@ -1040,29 +888,6 @@ def check_rulings(root=None, now=None):
         rulings.extend(parsed_rulings)
         markers.extend(parsed_markers)
 
-    # package.json scripts, read once.
-    try:
-        pkg = json_parse(_read_text(os.path.join(root, 'package.json')))
-        if pkg is None:
-            raise TypeError('null package.json')
-        scripts = _js_get(pkg, 'scripts')
-        if not _js_truthy(scripts):
-            scripts = {}
-    except Exception:
-        scripts = None
-    files_cache = []
-
-    def get_files():
-        if not files_cache:
-            files_cache.append(list_files(root))
-        return files_cache[0]
-
-    real_root = root
-    try:
-        real_root = _realpath(root)
-    except (OSError, ValueError):
-        pass  # root does not exist; the docs/ and schema errors already say so.
-
     by_id = {}
     for r in rulings:
         def at(message, r=r):
@@ -1087,10 +912,10 @@ def check_rulings(root=None, now=None):
         elif schema and not (isinstance(areas[area], str) and areas[area] == r['doc']):
             at('area %s belongs in %s, not %s' % (area, js_to_string(areas[area]), r['doc']))
 
-        # Rule 3: Paths and Tests exist, inside the repo.
+        # Rule 3: Paths and Tests items do not point outside the repo (text only).
         for field in ('paths', 'tests'):
             for item in r.get(field) or []:
-                check_path_item(root, real_root, item, field, get_files, scripts, at)
+                check_path_item(item, field, at)
 
     # Rule 2: Replaces and Replaced markers link both ways.
     for r in rulings:

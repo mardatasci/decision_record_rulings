@@ -70,7 +70,7 @@ Find its doc in `docs/README.md` and read it; its rulings apply.
 | Covers | no | What it applies to, in words. |
 | Paths | no | Files or globs it governs. An agent editing them reads this ruling first. |
 | Replaces | no | The ID(s) of the ruling(s) it replaces. |
-| Tests | no | Test files or an npm run script that check it. |
+| Tests | no | Test files that check it. |
 
 When a ruling is replaced, the old one stays, with this marker on the line right after it:
 
@@ -91,7 +91,7 @@ An example:
 
 1. The ID is unique across docs/.
 2. Every ID in Replaces exists, and that ruling carries a Replaced → marker pointing back. The link must go both ways.
-3. Every file in Paths or Tests exists; a glob must match at least one file, and nothing may point outside the repo. npm run X must be a real script.
+3. Paths and Tests items may not point outside the repo (no absolute paths or ..).
 4. Dates are real and not in the future.
 5. The area is in the schema's list, and the ruling sits in that area's doc.
 
@@ -153,6 +153,8 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 - Applies the five rules and prints `docs/x.md:LINE  R-ID  message` for each problem, then N rulings in M docs, E errors. It exits with 1 if there are errors.
 - --json prints the extracted rulings, which match the schema.
 - Has its own tests that run against sample doc folders, never the real docs.
+
+It reads only docs/ and the schema, and does not check that files named in Paths or Tests exist.
 
 A reference implementation is in `reference/` of the owner-rulings repo; copy `scripts/check_rulings.py` and its tests rather than writing your own, then change the area list in the schema.
 

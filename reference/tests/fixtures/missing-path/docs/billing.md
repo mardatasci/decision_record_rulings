@@ -1,3 +1,0 @@
-# Billing
-
-No rulings yet.
