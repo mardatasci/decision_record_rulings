@@ -6,8 +6,10 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timezone
 
@@ -36,6 +38,11 @@ FAILURES = {
     'replaced-one-way': [
         'docs/development.md:4  R-DEV-001  Replaced → R-DEV-002, but R-DEV-002 does not list R-DEV-001 in Replaces',
     ],
+    'missing-path': [
+        'docs/development.md:3  R-DEV-001  Paths item "src/nope.js" does not exist',
+        'docs/development.md:3  R-DEV-001  Tests item "tests/nope.test.js" does not exist',
+    ],
+    'glob-no-match': ['docs/development.md:3  R-DEV-001  Paths glob "src/**/*.ts" matches no files'],
     'path-outside-root': ['docs/development.md:3  R-DEV-001  Paths item "../valid/package.json" points outside the repo'],
     'impossible-date': ['docs/development.md:3  R-DEV-001  date 2026-02-30 is not a real calendar date'],
     'future-date': ['docs/development.md:3  R-DEV-001  date 2999-01-01 is in the future'],
@@ -55,6 +62,8 @@ FAILURES = {
     ],
     'doc-without-area': ['docs/extra.md:1  -  docs/extra.md has no area in x-areas'],
     'area-without-doc': ['docs/rulings.schema.json:1  -  area BILLING: docs/billing.md does not exist'],
+    # A wrapped line starting with ordinary bold continues the ruling.
+    'wrapped-bold': ['docs/development.md:3  R-DEV-001  Paths item "src/nope.js" does not exist'],
     'unknown-field': [
         'docs/development.md:3  R-DEV-001  unknown field "**Paths**:"',
         'docs/development.md:3  R-DEV-001  unknown field "**paths:**"',
@@ -94,6 +103,8 @@ FAILURES = {
     'self-replace': ['docs/development.md:3  R-DEV-001  ruling replaces itself'],
     'empty-field': ['docs/development.md:3  R-DEV-001  Why is empty'],
     'unquoted-item': ['docs/development.md:3  R-DEV-001  Paths items must be backtick-quoted, e.g. `src/x.js`'],
+    # Tests items are files only; an npm command is just a path that does not exist.
+    'npm-run-item': ['docs/development.md:3  R-DEV-001  Tests item "npm run lint" does not exist'],
     'absolute-path': ['docs/development.md:3  R-DEV-001  Paths item "/etc/hosts" points outside the repo'],
     'glob-dotdot': ['docs/development.md:3  R-DEV-001  Paths item "src/../../*.js" points outside the repo'],
     'missing-schema': ['docs/rulings.schema.json:1  -  schema file not found'],
@@ -124,9 +135,9 @@ class CheckRulingsTest(unittest.TestCase):
             'decision': 'run the tests before every push.',
             'why': 'CI minutes are limited.',
             'covers': 'every worker.',
-            'paths': ['src/**/*.js', 'package.json'],
+            'paths': ['src/**/*.js', 'src/app.js'],
             'replacedBy': {'id': 'R-DEV-002', 'date': '2026-03-01'},
-            'tests': ['tests/dev.test.js', 'npm run lint'],
+            'tests': ['tests/dev.test.js', 'scripts/pre-push.sh'],
         })
         self.assertEqual(by_id['R-DEV-002'], {
             'id': 'R-DEV-002',
@@ -213,18 +224,23 @@ class CheckRulingsTest(unittest.TestCase):
             'docs/development.md:3  R-DEV-001  date 2026-01-15 is in the future',
         ])
 
-    def test_wrapped_bold(self):
-        """a wrapped line starting with ordinary bold continues the ruling"""
-        result = check_rulings(fixture('wrapped-bold'))
-        self.assertEqual(result['errors'], [])
-        self.assertEqual([r['paths'] for r in result['rulings']], [['src/nope.js']])
-
-    def test_nonexistent_paths_are_text(self):
-        """Paths and Tests naming files that do not exist -> 0 errors"""
-        result = check_rulings(fixture('nonexistent-paths'))
-        self.assertEqual(result['errors'], [])
-        self.assertEqual(result['rulings'][0]['paths'], ['src/nope.js', 'src/**/*.ts'])
-        self.assertEqual(result['rulings'][0]['tests'], ['tests/nope.test.js', 'npm run nope'])
+    @unittest.skipIf(sys.platform == 'win32', 'symlinks')
+    def test_symlink_escape(self):
+        """symlinks that point outside the repo are rejected"""
+        tmp = tempfile.mkdtemp(prefix='check-rulings-')
+        try:
+            repo = os.path.join(tmp, 'repo')
+            shutil.copytree(fixture('symlink-escape'), repo, symlinks=True)
+            with open(os.path.join(tmp, 'outside.js'), 'w'):
+                pass
+            os.symlink(os.path.join(tmp, 'outside.js'), os.path.join(repo, 'src', 'link.js'))
+            os.symlink('ok.js', os.path.join(repo, 'src', 'inside.js'))
+            self.assertEqual([format_error(e) for e in check_rulings(repo)['errors']], [
+                'docs/development.md:3  R-DEV-001  Paths item "src/link.js" points outside the repo',
+                'docs/development.md:3  R-DEV-001  Paths glob "src/**/*.js" matches "src/link.js", which points outside the repo',
+            ])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_cli(self):
         """CLI: exit codes and summary line"""
@@ -238,11 +254,11 @@ class CheckRulingsTest(unittest.TestCase):
         self.assertEqual(ok.returncode, 0)
         self.assertEqual(ok.stdout.decode('utf-8'), '7 rulings in 2 docs, 0 errors\n')
 
-        bad = run('--root', fixture('path-outside-root'))
+        bad = run('--root', fixture('missing-path'))
         self.assertEqual(bad.returncode, 1)
         self.assertEqual(
             bad.stdout.decode('utf-8'),
-            '\n'.join(FAILURES['path-outside-root'] + ['1 rulings in 2 docs, 1 errors', '']),
+            '\n'.join(FAILURES['missing-path'] + ['1 rulings in 2 docs, 2 errors', '']),
         )
 
         js = run('--root', fixture('valid'), '--json')
