@@ -156,9 +156,12 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 
 A reference implementation is in `reference/` of the owner-rulings repo, https://github.com/mardatasci/decision_record_rulings (or take the same files from a local clone of it); copy `scripts/check_rulings.py`, `tests/` (with `fixtures/`) and `docs/rulings.schema.json` rather than writing your own, then change the area list in the schema's three places (x-areas, the ID pattern, the doc enum).
 
-In CI it's its own step, at the end of the job, so it always runs and never hides other checks:
+In CI it's its own step, at the end of the job, so it always runs and never hides other checks. Its own tests run in the step just before it:
 
 ```yaml
+- name: Rulings checker tests pass
+  run: python3 -m unittest discover -s tests
+
 - name: Owner rulings are well-formed
   if: ${{ !cancelled() }}
   run: python3 scripts/check_rulings.py
@@ -213,9 +216,10 @@ parks, and says so explicitly.
 ## How we set it up (order of work)
 
 1. Inventory every doc. Resolve conflicting decisions with the owner, one at a time.
-2. Write each decision into its area doc, and mark outdated statements "Replaced →" rather than deleting them.
-3. Slim CLAUDE.md so it points to docs/.
-4. Add IDs, then the schema, then the checker, then CI, then the skill.
+2. Propose the areas and get the owner's approval, then create docs/README.md, docs/development.md and one doc per approved area.
+3. Write each confirmed decision into its area doc as a ruling with an ID, and mark outdated statements "Replaced →" rather than deleting them.
+4. Slim CLAUDE.md so it points to docs/.
+5. Copy the schema, the checker and its tests from reference/, then add CI, then the /ruling skill.
 
 Starter prompt to paste into Claude Code:
 
@@ -232,11 +236,11 @@ Set up owner rulings in this repo using the kit above. Before you start:
 Work one step at a time and wait for my approval between steps:
 
 1. Inventory the docs and list every decision you find, with any that conflict. Don't change anything yet.
-2. Create docs/README.md, docs/development.md (the ruling format and the cross-cutting rulings) and one docs/<area>.md per area, and propose the area list to me.
+2. Propose the area list. After I approve it, create docs/README.md, docs/development.md (the ruling format and the cross-cutting rulings) and one docs/<area>.md per approved area.
 3. Write each decision I confirm as a ruling with an ID. Mark outdated statements "Replaced →"; never delete.
 4. Make CLAUDE.md short: @docs/development.md plus a "Never miss these" list.
 5. Copy the checker from the kit; don't write one from scratch: reference/scripts/check_rulings.py into scripts/, the contents of reference/tests/ into tests/ (so you end up with tests/test_check_rulings.py and tests/fixtures/), and reference/docs/rulings.schema.json into docs/. Then edit only x-areas, the ID pattern and the doc enum for this repo. Its tests run on sample docs only. Keep the test folder and script folder as siblings: the copied test finds the script at ../scripts/check_rulings.py. If I choose another location, update the CI command and any later references to match. Every top-level docs/*.md other than README.md must be an area in x-areas; for each existing doc that isn't, ask me whether to make it an area or move it to a subfolder such as docs/notes/. If the repo has a JS/TS test runner, linter or type-checker, exclude tests/fixtures/ from it and show me the change. Then run python3 scripts/check_rulings.py and python3 -m unittest discover -s tests and show me both outputs.
-6. Add the checker to CI as its own last step with if: ${{ !cancelled() }}, not inside the deploy gate.
+6. Add the checker to CI as its own last step with if: ${{ !cancelled() }}, not inside the deploy gate. Also run python3 -m unittest discover -s tests in CI so the checker's own tests run.
 7. Create the /ruling skill in .claude/skills/ruling/SKILL.md.
 
 Only I make rulings. Never turn your own suggestion into one. Ask me one question at a time, and check the code before asking about something that may already be settled.

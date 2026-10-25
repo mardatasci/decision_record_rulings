@@ -10,11 +10,11 @@ Set up owner rulings in this repo using the kit above. Before you start:
 Work one step at a time and wait for my approval between steps:
 
 1. Inventory the docs and list every decision you find, with any that conflict. Don't change anything yet.
-2. Create docs/README.md, docs/development.md (the ruling format and the cross-cutting rulings) and one docs/<area>.md per area, and propose the area list to me.
+2. Propose the area list. After I approve it, create docs/README.md, docs/development.md (the ruling format and the cross-cutting rulings) and one docs/<area>.md per approved area.
 3. Write each decision I confirm as a ruling with an ID. Mark outdated statements "Replaced →"; never delete.
 4. Make CLAUDE.md short: @docs/development.md plus a "Never miss these" list.
 5. Copy the checker from the kit; don't write one from scratch: reference/scripts/check_rulings.py into scripts/, the contents of reference/tests/ into tests/ (so you end up with tests/test_check_rulings.py and tests/fixtures/), and reference/docs/rulings.schema.json into docs/. Then edit only x-areas, the ID pattern and the doc enum for this repo. Its tests run on sample docs only. Keep the test folder and script folder as siblings: the copied test finds the script at ../scripts/check_rulings.py. If I choose another location, update the CI command and any later references to match. Every top-level docs/*.md other than README.md must be an area in x-areas; for each existing doc that isn't, ask me whether to make it an area or move it to a subfolder such as docs/notes/. If the repo has a JS/TS test runner, linter or type-checker, exclude tests/fixtures/ from it and show me the change. Then run python3 scripts/check_rulings.py and python3 -m unittest discover -s tests and show me both outputs.
-6. Add the checker to CI as its own last step with if: ${{ !cancelled() }}, not inside the deploy gate.
+6. Add the checker to CI as its own last step with if: ${{ !cancelled() }}, not inside the deploy gate. Also run python3 -m unittest discover -s tests in CI so the checker's own tests run.
 7. Create the /ruling skill in .claude/skills/ruling/SKILL.md.
 
 Only I make rulings. Never turn your own suggestion into one. Ask me one question at a time, and check the code before asking about something that may already be settled.

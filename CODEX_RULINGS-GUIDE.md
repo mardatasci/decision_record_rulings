@@ -159,9 +159,12 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 
 A reference implementation is in `reference/` of the owner-rulings repo, https://github.com/mardatasci/decision_record_rulings (or take the same files from a local clone of it); copy `scripts/check_rulings.py`, `tests/` (with `fixtures/`) and `docs/rulings.schema.json` rather than writing your own, then change the area list in the schema's three places (x-areas, the ID pattern, the doc enum).
 
-In CI it's its own step, at the end of the job, so it always runs and never hides other checks:
+In CI it's its own step, at the end of the job, so it always runs and never hides other checks. Its own tests run in the step just before it:
 
 ```yaml
+- name: Rulings checker tests pass
+  run: python3 -m unittest discover -s tests
+
 - name: Owner rulings are well-formed
   if: ${{ !cancelled() }}
   run: python3 scripts/check_rulings.py
@@ -190,6 +193,7 @@ Only the owner makes rulings. A worker's proposal never becomes a ruling, and "t
 ## How we set it up (order of work)
 
 1. Inventory every doc. Resolve conflicting decisions with the owner, one at a time.
-2. Write each decision into its area doc, and mark outdated statements "Replaced →" rather than deleting them.
-3. Slim AGENTS.md so it points to docs/, keeping only the hard rules in it, and add folder AGENTS.md files for high-risk folders.
-4. Add IDs, then the schema, then the checker, then CI, then the recording procedure.
+2. Propose the areas and get the owner's approval, then create docs/README.md, docs/development.md (with the format and the recording procedure) and one doc per approved area.
+3. Write each confirmed decision into its area doc as a ruling with an ID, and mark outdated statements "Replaced →" rather than deleting them.
+4. Slim AGENTS.md so it points to docs/, keeping only the hard rules in it, and add folder AGENTS.md files for high-risk folders.
+5. Copy the schema, the checker and its tests from reference/, then add CI.

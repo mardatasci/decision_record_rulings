@@ -1,7 +1,8 @@
 # Tests for scripts/check_rulings.py. They run only against the sample
 # repos in tests/fixtures/, never against real docs.
 #
-# Run from reference/: python3 -m unittest discover -s tests
+# Run from the folder that contains tests/ and scripts/ (reference/ in this
+# kit, the repo root once copied): python3 -m unittest discover -s tests
 # Each test's docstring is its name in the original JS suite.
 import json
 import os
