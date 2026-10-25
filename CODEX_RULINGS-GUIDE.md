@@ -157,7 +157,7 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 - --json prints the extracted rulings, which match the schema.
 - Has its own tests that run against sample doc folders, never the real docs.
 
-A reference implementation is in `reference/` of the owner-rulings repo; copy `scripts/check_rulings.py` and its tests rather than writing your own, then change the area list in the schema.
+A reference implementation is in `reference/` of the owner-rulings repo, https://github.com/mardatasci/decision_record_rulings (or take the same files from a local clone of it); copy `scripts/check_rulings.py`, `tests/` (with `fixtures/`) and `docs/rulings.schema.json` rather than writing your own, then change the area list in the schema's three places (x-areas, the ID pattern, the doc enum).
 
 In CI it's its own step, at the end of the job, so it always runs and never hides other checks:
 

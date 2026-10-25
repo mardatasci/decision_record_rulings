@@ -154,7 +154,7 @@ The area list appears three times: x-areas, the ID pattern and the doc list. The
 - --json prints the extracted rulings, which match the schema.
 - Has its own tests that run against sample doc folders, never the real docs.
 
-A reference implementation is in `reference/` of the owner-rulings repo; copy `scripts/check_rulings.py` and its tests rather than writing your own, then change the area list in the schema.
+A reference implementation is in `reference/` of the owner-rulings repo, https://github.com/mardatasci/decision_record_rulings (or take the same files from a local clone of it); copy `scripts/check_rulings.py`, `tests/` (with `fixtures/`) and `docs/rulings.schema.json` rather than writing your own, then change the area list in the schema's three places (x-areas, the ID pattern, the doc enum).
 
 In CI it's its own step, at the end of the job, so it always runs and never hides other checks:
 
@@ -220,12 +220,22 @@ parks, and says so explicitly.
 Starter prompt to paste into Claude Code:
 
 ```text
-Set up owner rulings in this repo as described in the attached write-up. Work one step at a time and wait for my approval between steps:
+Kit location: https://github.com/mardatasci/decision_record_rulings (branch main)
+(To use a local clone instead, replace everything after "Kit location:" with its absolute path before pasting.)
+
+Set up owner rulings in this repo using the kit above. Before you start:
+
+- If the current directory is the kit itself (it contains STARTER_PROMPT_CLAUDE.md and reference/scripts/check_rulings.py), stop, ask me for the path to the target repo and work there. Never set up rulings inside the kit.
+- If the kit location is a local path, use it. Otherwise shallow-clone it into a new temporary directory outside this repo (`mktemp -d`, then `git clone --depth 1 --branch main <kit location> <that dir>`) and use that clone as the kit. Keep it until the last step is approved, then delete only that directory. If cloning isn't possible, stop and ask me for the path to a local clone. Read CLAUDE_RULINGS-GUIDE.md from the kit first; it describes the whole setup.
+- Before changing anything, check whether this repo already has CLAUDE.md, docs/, scripts/, tests/, .claude/skills/ or CI config. Merge into existing files instead of overwriting them, and show me the proposed changes to any existing file before writing it. If tests/ or scripts/ already exist, ask me before placing the checker files there.
+
+Work one step at a time and wait for my approval between steps:
+
 1. Inventory the docs and list every decision you find, with any that conflict. Don't change anything yet.
 2. Create docs/README.md, docs/development.md (the ruling format and the cross-cutting rulings) and one docs/<area>.md per area, and propose the area list to me.
 3. Write each decision I confirm as a ruling with an ID. Mark outdated statements "Replaced →"; never delete.
 4. Make CLAUDE.md short: @docs/development.md plus a "Never miss these" list.
-5. Add docs/rulings.schema.json, scripts/check_rulings.py with tests on sample docs only.
+5. Copy the checker from the kit; don't write one from scratch: reference/scripts/check_rulings.py into scripts/, the contents of reference/tests/ into tests/ (so you end up with tests/test_check_rulings.py and tests/fixtures/), and reference/docs/rulings.schema.json into docs/. Then edit only x-areas, the ID pattern and the doc enum for this repo. Its tests run on sample docs only. Keep the test folder and script folder as siblings: the copied test finds the script at ../scripts/check_rulings.py. If I choose another location, update the CI command and any later references to match. Every top-level docs/*.md other than README.md must be an area in x-areas; for each existing doc that isn't, ask me whether to make it an area or move it to a subfolder such as docs/notes/. If the repo has a JS/TS test runner, linter or type-checker, exclude tests/fixtures/ from it and show me the change. Then run python3 scripts/check_rulings.py and python3 -m unittest discover -s tests and show me both outputs.
 6. Add the checker to CI as its own last step with if: ${{ !cancelled() }}, not inside the deploy gate.
 7. Create the /ruling skill in .claude/skills/ruling/SKILL.md.
 
