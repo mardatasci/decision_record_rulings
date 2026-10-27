@@ -6,7 +6,9 @@ A **ruling** is a decision made by the project owner, written into the doc for t
 
 - **The owner decides.** Everyone else is a worker: people, Claude Code, Codex and their subagents. Workers investigate, propose, build and report. They never make or change a ruling.
 - **Rulings live in the area docs.** There's no file per decision. Read `docs/billing.md` and you get every billing rule at once.
-- **Nothing is deleted.** An overturned ruling stays in place and gets a `Replaced →` marker that points to the ruling that replaces it. A ruling followed by a `Replaced →` marker is history, not in force.
+- **Area docs hold only rulings in force.** An agent reading one sees only rules that apply.
+- **Nothing is deleted.** An overturned ruling moves, unchanged, to the area's history file, `docs/history/billing.md`, with a `Replaced →` marker that points to the ruling that replaces it. A ruling followed by a `Replaced →` marker is history, not in force.
+- **The owner's words are kept.** When a ruling condenses what the owner said, the exact words go in `docs/statements/billing.md`, which is only ever added to. The ruling links them with `Source`.
 - **Rulings are enforced.** A ruling that code could break gets a test named after it; a judgment call is marked `Enforced: review` and checked in review. Before editing a file, an agent runs `python3 scripts/check_rulings.py --for <file>` to see every ruling that applies to it.
 - **A checker runs in CI.** A broken or invented ruling fails the build.
 

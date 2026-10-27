@@ -18,31 +18,46 @@
 #   --json        Print the extracted rulings as a JSON array matching the
 #                 schema on stdout. Problems and the summary go to stderr.
 #
+# Area docs (docs/<name>.md) hold the rulings in force. A replaced ruling moves,
+# with its Replaced marker, to the area's history file docs/history/<name>.md.
+# A ruling's Source names the file in docs/statements/ that keeps the owner's
+# exact words; that file must mention the ruling's ID. History is never
+# reworded, so the Paths and Tests of replaced rulings are not checked on disk;
+# their Source still is.
+#
 # Full check (no lookup option): prints, in this order, one line per problem,
 # `docs/x.md:LINE  R-ID  message`, then a note line for each in-force ruling
 # with neither Tests nor Enforced, then
 # `Enforcement: T tested, V review-only, U not enforced (of K in-force rulings)`
-# and `N rulings in M docs, E errors`. Notes never count as errors. A ruling
-# counts as tested only if it has Tests and none of its Tests items has an
-# error. Exits 1 if there are errors, else 0.
+# and `N rulings in M docs, E errors` (`N rulings in M docs (H history files),
+# E errors` when there are history files). Notes never count as errors. A
+# ruling counts as tested only if it has Tests and none of its Tests items has
+# an error. Exits 1 if there are errors, else 0.
 #
 # Lookup (run it from the repo root, or pass --root, before editing a file; it
-# reads only the schema and docs/, never walks the repo and never checks
-# Paths/Tests on disk):
+# reads only the schema, the area docs and the history files, never walks the
+# repo, never reads docs/statements/ and never checks Paths/Tests/Source on
+# disk):
 #   --for <path>  Rulings that apply to the file: a Paths item matches it, or
 #                 it falls under the x-area-paths of the ruling's area. May
 #                 repeat; results are grouped per path. Relative paths are
 #                 taken relative to the root.
-#   --area <AREA> Every ruling in the area that has not been replaced.
-#   --id <ID>     That ruling, even if it has been replaced.
-#   --for and --area print rulings that have not been replaced, of any kind:
-#   Ruled ones bind; Parked and Asked ones are shown for context.
+#   --area <AREA> Every ruling in force in the area.
+#   --id <ID>     That ruling, wherever it is, even if it has been replaced
+#                 (it is then in a history file, whose path and line are shown).
+#   --for and --area print only rulings in force: in an area doc (not a history
+#   file) and not replaced. Of any kind: Ruled ones bind; Parked and Asked ones
+#   are shown for context.
 #   Use one kind of lookup per call. With --json, prints the selected rulings
 #   as a JSON array. Exits 0; 1 if --id finds nothing; 2 on a usage error or
 #   when no rulings are found at the root (no docs/rulings.schema.json or
-#   docs/). If the docs have problems that the docs alone show (rules 1, 2, 4
-#   and 5, malformed rulings, the schema), a warning goes to stderr and
-#   results still print.
+#   docs/). If the docs have problems that the docs alone show, a warning with
+#   their count goes to stderr and results still print. Those are: rules 1, 2,
+#   4 and 5; the placement rule (in force in the area doc, replaced in its
+#   history file); malformed rulings, fields and Replaced markers, including a
+#   Source that is not one backtick-quoted file in docs/statements/; unclosed
+#   code fences; and the schema (its own shape, a doc without an area, an area
+#   without a doc, a history file without an area doc).
 #
 # Zero dependencies: Python 3.8+ standard library only.
 
@@ -57,8 +72,10 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 SCHEMA_PATH = 'docs/rulings.schema.json'
-FIELDS = ['Why', 'Covers', 'Paths', 'Replaces', 'Tests', 'Enforced']
-RESERVED_DOCS = ('README.md', 'RULINGS.md')  # in docs/, never area docs
+FIELDS = ['Why', 'Covers', 'Paths', 'Replaces', 'Tests', 'Enforced', 'Source']
+RESERVED_DOCS = ('README.md', 'RULINGS.md')  # in docs/ and docs/history/, never rulings files
+HISTORY_DIR = 'docs/history'  # docs/history/<name>.md: replaced rulings of docs/<name>.md
+SOURCE_RE = re.compile(r'^docs/statements/[^/]+\.md\Z')  # a Source item
 KIND_WORDS = {'ruled': 'Ruled', 'parked': 'Parked', 'asked': 'Asked'}
 KINDS = {'Ruled': 'ruled', 'Parked': 'parked', 'Asked': 'asked'}
 SKIP_DIRS = {'.git', 'node_modules'}
@@ -733,17 +750,20 @@ def read_schema(root, errors):
     return {'areas': areas, 'areaPaths': area_paths}
 
 
-def parse_doc(doc, text, errors, today):
+def parse_doc(file, text, errors, today, doc=None):
     """
-    Parses one doc into rulings and Replaced markers. Malformed lookalikes are
-    reported as errors.
+    Parses one area doc or history file into rulings and Replaced markers.
+    `file` is where the text comes from; `doc` is its area doc (default: the
+    file itself). Malformed lookalikes are reported as errors.
     """
+    if doc is None:
+        doc = file
     lines = LINE_SPLIT_RE.split(text)
     rulings = []
     markers = []
 
     def err(line, rid, message):
-        errors.append({'file': doc, 'line': line, 'id': rid, 'message': message})
+        errors.append({'file': file, 'line': line, 'id': rid, 'message': message})
 
     # Mark lines inside fenced code blocks.
     in_code = [False] * len(lines)
@@ -892,7 +912,7 @@ def parse_doc(doc, text, errors, today):
                 prev_malformed_end = end
                 i = end + 1
                 continue
-            ruling = {'id': rid, 'kind': kind, 'date': m.group(3), 'doc': doc, 'line': line_no}
+            ruling = {'id': rid, 'kind': kind, 'date': m.group(3), 'doc': doc, 'file': file, 'line': line_no}
             parse_fields(ruling, body, err)
             rulings.append(ruling)
             prev_ruling = ruling
@@ -966,6 +986,22 @@ def parse_fields(ruling, body, err):
                 at('Replaces lists an ID more than once')
             if good:
                 ruling['replaces'] = _dedupe(good)
+        elif name == 'Source':
+            # One file in docs/statements/; it is checked on disk in the full check.
+            items, leftover = backtick_items(value)
+            non_empty = [x for x in items if x]
+            if leftover or not items:
+                at('Source must be backtick-quoted, e.g. `docs/statements/billing.md`')
+            elif len(non_empty) != len(items):
+                at('Source has an empty item')
+            elif len(non_empty) > 1:
+                at('Source must be one file')
+            elif is_glob(non_empty[0]):
+                at('Source must be a file, not a glob')
+            elif not SOURCE_RE.search(non_empty[0]):
+                at('Source must be a file in docs/statements/')
+            else:
+                ruling['source'] = non_empty[0]
         else:
             items, leftover = backtick_items(value)
             if leftover:
@@ -1093,8 +1129,10 @@ def _mentions(full, rx, length):
 
 def read_docs(root, today, errors):
     """
-    Reads the schema and parses every area doc; touches nothing outside docs/.
-    Returns (schema, doc_files, rulings, markers); problems go to `errors`.
+    Reads the schema and parses every area doc and every history file
+    (docs/history/*.md); touches nothing else (never docs/statements/).
+    Returns (schema, doc_files, history_files, rulings, markers); problems go
+    to `errors`.
     """
     rulings = []
     markers = []
@@ -1114,7 +1152,20 @@ def read_docs(root, today, errors):
     except OSError:
         errors.append({'file': 'docs/', 'line': None, 'id': '-', 'message': 'docs/ folder not found'})
 
-    # The schema must not go stale: every doc has an area, every area a doc.
+    # History files are optional: docs/history/ exists once a ruling is replaced.
+    # README.md and RULINGS.md are never history files, as in docs/.
+    history_files = []
+    try:
+        history_files = sorted(
+            (HISTORY_DIR + '/' + name for name, e in _scandir_sorted(os.path.join(root, HISTORY_DIR))
+             if e.is_file(follow_symlinks=False) and name.endswith('.md') and name not in RESERVED_DOCS),
+            key=_utf16_key,
+        )
+    except OSError:
+        pass
+
+    # The schema must not go stale: every doc has an area, every area a doc,
+    # and every history file an area doc.
     if schema:
         for doc in doc_files:
             if doc not in docs_with_area:
@@ -1122,30 +1173,52 @@ def read_docs(root, today, errors):
         for area, doc in areas.items():
             if isinstance(doc, str) and doc not in doc_files:
                 errors.append({'file': SCHEMA_PATH, 'line': 1, 'id': '-', 'message': 'area %s: %s does not exist' % (area, doc)})
+        for hist in history_files:
+            doc = history_doc(hist)
+            if doc not in docs_with_area:
+                errors.append({'file': hist, 'line': 1, 'id': '-',
+                               'message': '%s has no area doc %s in x-areas' % (hist, doc)})
 
     for doc in doc_files:
         parsed_rulings, parsed_markers = parse_doc(doc, _read_text(os.path.join(root, doc)), errors, today)
         rulings.extend(parsed_rulings)
         markers.extend(parsed_markers)
-    return schema, doc_files, rulings, markers
+    for hist in history_files:
+        parsed_rulings, parsed_markers = parse_doc(hist, _read_text(os.path.join(root, hist)), errors, today,
+                                                   doc=history_doc(hist))
+        rulings.extend(parsed_rulings)
+        markers.extend(parsed_markers)
+    return schema, doc_files, history_files, rulings, markers
+
+
+def history_doc(hist):
+    """The area doc of a history file: docs/history/<name>.md -> docs/<name>.md."""
+    return 'docs/' + hist[len(HISTORY_DIR) + 1:]
+
+
+def history_file(doc):
+    """The history file of an area doc: docs/<name>.md -> docs/history/<name>.md."""
+    return HISTORY_DIR + '/' + doc[len('docs/'):]
 
 
 def check_doc_rules(schema, rulings, markers, today, errors):
     """
     The checks the docs alone settle, with no file tree: rule 1 (unique IDs),
-    rule 2 (Replaces and Replaced markers link both ways), rule 4 (dates) and
-    rule 5 (known area, right doc). Used by the full check and by lookups.
+    rule 2 (Replaces and Replaced markers link both ways), rule 4 (dates),
+    rule 5 (known area, right doc) and where a ruling sits (in force in the
+    area doc, replaced in its history file). Used by the full check and by
+    lookups. Errors point to the file a ruling sits in.
     """
     areas = schema['areas'] if schema else {}
     by_id = {}
     for r in rulings:
         def at(message, r=r):
-            errors.append({'file': r['doc'], 'line': r['line'], 'id': r['id'], 'message': message})
+            errors.append({'file': r['file'], 'line': r['line'], 'id': r['id'], 'message': message})
 
-        # Rule 1: unique ID.
+        # Rule 1: unique ID, across area docs and history files.
         first = by_id.get(r['id'])
         if first:
-            at('duplicate ID; first defined at %s:%s' % (first['doc'], first['line']))
+            at('duplicate ID; first defined at %s:%s' % (first['file'], first['line']))
         else:
             by_id[r['id']] = r
 
@@ -1154,12 +1227,28 @@ def check_doc_rules(schema, rulings, markers, today, errors):
         if dp:
             at(dp)
 
-        # Rule 5: known area, right doc.
+        # Rule 5: known area, in its area doc or that doc's history file.
         area = ID_AREA_RE.search(r['id']).group(1)
+        placed = True
         if schema and area not in areas:
             at("area %s is not in the schema's x-areas" % area)
+            placed = False
         elif schema and not (isinstance(areas[area], str) and areas[area] == r['doc']):
-            at('area %s belongs in %s, not %s' % (area, js_to_string(areas[area]), r['doc']))
+            want = areas[area]
+            if isinstance(want, str) and AREA_DOC_RE.search(want):
+                at('area %s belongs in %s or %s, not %s' % (area, want, history_file(want), r['file']))
+            else:
+                at('area %s belongs in %s, not %s' % (area, js_to_string(want), r['file']))
+            placed = False
+
+        # In force in the area doc; replaced in its history file. Checked only
+        # when the area is right, so the advice never contradicts rule 5.
+        if placed:
+            in_history = r['file'] != r['doc']
+            if 'replacedBy' in r and not in_history:
+                at('replaced ruling must move to %s' % history_file(r['doc']))
+            elif 'replacedBy' not in r and in_history:
+                at('ruling in history has no Replaced marker; rulings in force belong in %s' % r['doc'])
 
     # Rule 2: Replaces and Replaced markers link both ways.
     for r in rulings:
@@ -1167,7 +1256,7 @@ def check_doc_rules(schema, rulings, markers, today, errors):
             target = by_id.get(old)
 
             def at(message, r=r):
-                errors.append({'file': r['doc'], 'line': r['line'], 'id': r['id'], 'message': message})
+                errors.append({'file': r['file'], 'line': r['line'], 'id': r['id'], 'message': message})
 
             if old == r['id']:
                 at('ruling replaces itself')
@@ -1181,10 +1270,10 @@ def check_doc_rules(schema, rulings, markers, today, errors):
         if not ID_RE.search(by):
             continue  # already reported
         if not target:
-            errors.append({'file': ruling['doc'], 'line': line, 'id': ruling['id'],
+            errors.append({'file': ruling['file'], 'line': line, 'id': ruling['id'],
                            'message': 'Replaced → %s, which does not exist' % by})
         elif ruling['id'] not in (target.get('replaces') or []):
-            errors.append({'file': ruling['doc'], 'line': line, 'id': ruling['id'],
+            errors.append({'file': ruling['file'], 'line': line, 'id': ruling['id'],
                            'message': 'Replaced → %s, but %s does not list %s in Replaces' % (by, by, ruling['id'])})
 
 
@@ -1193,12 +1282,13 @@ def check_rulings(root=None, now=None):
     Checks the rulings in the repo at `root` (default: current directory).
     `now` (an aware datetime) replaces the current time (for tests).
     Returns {'rulings': [...], 'errors': [{file, line, id, message}], 'docCount': int,
-    'notes': [{file, line, id, message}], 'enforcement': {tested, review, unenforced, inForce}}.
+    'historyCount': int, 'notes': [{file, line, id, message}],
+    'enforcement': {tested, review, unenforced, inForce}}.
     """
     root = _resolve(os.getcwd() if root is None else os.fspath(root))
     today = latest_today(now)
     errors = []
-    schema, doc_files, rulings, markers = read_docs(root, today, errors)
+    schema, doc_files, history_files, rulings, markers = read_docs(root, today, errors)
 
     files_cache = []
 
@@ -1227,12 +1317,15 @@ def check_rulings(root=None, now=None):
     # least one file a Tests glob matches, outside docs/) must mention the
     # ruling's ID: any case, with - or _ separators (test names cannot contain
     # hyphens). A ruling counts as tested only if none of its Tests items fail.
+    # Replaced rulings are skipped: history is never reworded, so it must not
+    # fail when the code it named moves. Their Source is still checked.
+    real_statements = os.path.join(real_root, 'docs', 'statements')
     failed_tests = set()
     for r in rulings:
         def at(message, r=r):
-            errors.append({'file': r['doc'], 'line': r['line'], 'id': r['id'], 'message': message})
+            errors.append({'file': r['file'], 'line': r['line'], 'id': r['id'], 'message': message})
 
-        for field in ('paths', 'tests'):
+        for field in (() if 'replacedBy' in r else ('paths', 'tests')):
             for item in r.get(field) or []:
                 n_before = len(errors)
                 found = check_path_item(root, real_root, item, field, get_files, at)
@@ -1251,6 +1344,22 @@ def check_rulings(root=None, now=None):
                            % (item, r['id'], alt))
                 if field == 'tests' and len(errors) > n_before:
                     failed_tests.add(id(r))
+
+        # Source: the owner's words, in a file in docs/statements/ that
+        # mentions the ruling's ID like a Tests file does. Never affects coverage.
+        if 'source' in r:
+            item = r['source']
+            found = check_path_item(root, real_root, item, 'source', get_files, at, label='Source')
+            if found is not None and not _strictly_inside(real_statements, found[0]):
+                at('Source "%s" must resolve to a file in docs/statements/' % item)
+            elif found is not None:
+                state = _mentions(found[0], id_mention_regexp(r['id']), len(r['id']))
+                if state == 'dir':
+                    at('Source "%s" is a directory; list a file in docs/statements/' % item)
+                elif state == 'unreadable':
+                    at('Source "%s" could not be read' % item)
+                elif state == 'no':
+                    at('Source "%s" does not mention %s' % (item, r['id']))
 
     errors.sort(key=lambda e: (_utf16_key(e['file']), e['line'] if e['line'] is not None else 0))
 
@@ -1272,10 +1381,19 @@ def check_rulings(root=None, now=None):
             counts['unenforced'] += 1
             if 'tests' in r:
                 continue  # its failing Tests items are already reported as errors
-            notes.append({'file': r['doc'], 'line': r['line'], 'id': r['id'],
+            notes.append({'file': r['file'], 'line': r['line'], 'id': r['id'],
                           'message': 'note: not enforced; add Tests or Enforced: review'})
     return {'rulings': [to_schema_shape(r) for r in rulings], 'errors': errors, 'docCount': len(doc_files),
-            'notes': notes, 'enforcement': counts}
+            'historyCount': len(history_files), 'notes': notes, 'enforcement': counts}
+
+
+def _strictly_inside(real_dir, full):
+    """True if the real path of `full` is inside `real_dir` (not `real_dir` itself)."""
+    try:
+        real = _realpath(full)
+    except (OSError, ValueError):
+        return False
+    return real != _resolve(real_dir) and not _is_outside(real_dir, real)
 
 
 def is_in_force(r):
@@ -1288,8 +1406,8 @@ def to_schema_shape(r):
     out = {'id': r['id']}
     if not isinstance(r['kind'], _JsFunction):  # JSON.stringify drops functions
         out['kind'] = r['kind']
-    out.update({'date': r['date'], 'doc': r['doc'], 'line': r['line'], 'decision': r['decision']})
-    for k in ('why', 'covers', 'paths', 'replaces', 'replacedBy', 'tests', 'enforced'):
+    out.update({'date': r['date'], 'doc': r['doc'], 'file': r['file'], 'line': r['line'], 'decision': r['decision']})
+    for k in ('why', 'covers', 'paths', 'replaces', 'replacedBy', 'tests', 'enforced', 'source'):
         if k in r:
             out[k] = r[k]
     return out
@@ -1364,11 +1482,14 @@ def _has_rulings(root):
 
 def lookup_rulings(root=None, for_paths=None, area=None, rid=None, now=None):
     """
-    Finds rulings without walking the repo: reads the schema and docs/ only.
+    Finds rulings without walking the repo: reads the schema, the area docs
+    and the history files only.
     Pass exactly one of for_paths (a list), area or rid. --for and --area pick
-    rulings that have not been replaced, of any kind (Parked and Asked too).
-    Returns {'groups': [(label, [rulings])], 'rulings': [...], 'problems': int},
-    rulings in schema shape ordered by doc then line. Raises UsageError.
+    rulings in force (in an area doc and not replaced), of any kind (Parked
+    and Asked too); --id finds any ruling, including those in history files. Never reads
+    docs/statements/. Returns {'groups': [(label, [rulings])], 'rulings': [...],
+    'problems': int}, rulings in schema shape ordered by area doc, then file
+    (the area doc before its history file), then line. Raises UsageError.
     """
     root = _resolve(os.getcwd() if root is None else os.fspath(root))
     if not _has_rulings(root):
@@ -1376,11 +1497,11 @@ def lookup_rulings(root=None, for_paths=None, area=None, rid=None, now=None):
                          % (root, SCHEMA_PATH))
     errors = []
     today = latest_today(now)
-    schema, _docs, rulings, markers = read_docs(root, today, errors)
+    schema, _docs, _history, rulings, markers = read_docs(root, today, errors)
     check_doc_rules(schema, rulings, markers, today, errors)
     areas = schema['areas'] if schema else {}
     area_paths = schema['areaPaths'] if schema else {}
-    rulings = sorted(rulings, key=lambda r: (_utf16_key(r['doc']), r['line']))
+    rulings = sorted(rulings, key=_lookup_order)
     groups = []
 
     if for_paths:
@@ -1389,7 +1510,7 @@ def lookup_rulings(root=None, for_paths=None, area=None, rid=None, now=None):
             hit_areas = {a for a, items in area_paths.items() if any(item_matches(x, path) for x in items)}
             picked = [
                 r for r in rulings
-                if 'replacedBy' not in r and (
+                if _in_force_place(r) and (
                     _area_of(r) in hit_areas
                     or any(item_matches(x, path) for x in r.get('paths') or []))
             ]
@@ -1397,7 +1518,7 @@ def lookup_rulings(root=None, for_paths=None, area=None, rid=None, now=None):
     elif area is not None:
         if area not in areas:
             raise UsageError('unknown area "%s"; areas in x-areas: %s' % (area, js_join(list(areas.keys()), ', ') or '(none)'))
-        groups.append((area, [r for r in rulings if _area_of(r) == area and 'replacedBy' not in r]))
+        groups.append((area, [r for r in rulings if _area_of(r) == area and _in_force_place(r)]))
     elif rid is not None:
         picked = [r for r in rulings if r['id'] == rid]
         if not picked:
@@ -1413,7 +1534,7 @@ def lookup_rulings(root=None, for_paths=None, area=None, rid=None, now=None):
             if id(r) not in seen:
                 seen.add(id(r))
                 union.append(r)
-    union.sort(key=lambda r: (_utf16_key(r['doc']), r['line']))
+    union.sort(key=_lookup_order)
     return {
         'groups': [(label, [to_schema_shape(r) for r in picked]) for label, picked in groups],
         'rulings': [to_schema_shape(r) for r in union],
@@ -1421,10 +1542,20 @@ def lookup_rulings(root=None, for_paths=None, area=None, rid=None, now=None):
     }
 
 
+def _in_force_place(r):
+    """In its area doc (not a history file) and not replaced: what --for and --area show."""
+    return r['file'] == r['doc'] and 'replacedBy' not in r
+
+
+def _lookup_order(r):
+    """Area doc, then file (the area doc sorts before its history file), then line."""
+    return (_utf16_key(r['doc']), r['file'] != r['doc'], r['line'])
+
+
 def format_ruling(r):
     """A compact text block for one ruling (lookup output)."""
     kind = KIND_WORDS.get(r.get('kind'), js_to_string(r.get('kind', UNDEFINED)))
-    lines = ['%s · %s %s · %s:%s' % (r['id'], kind, r['date'], r['doc'], r['line']), '  ' + r['decision']]
+    lines = ['%s · %s %s · %s:%s' % (r['id'], kind, r['date'], r['file'], r['line']), '  ' + r['decision']]
     extra = []
     if 'why' in r:
         extra.append('Why: ' + r['why'])
@@ -1434,6 +1565,8 @@ def format_ruling(r):
         extra.append('Tests: ' + ', '.join('`%s`' % t for t in r['tests']))
     if 'enforced' in r:
         extra.append('Enforced: ' + r['enforced'])
+    if 'source' in r:
+        extra.append('Source: `%s`' % r['source'])
     if extra:
         lines.append('  ' + ' · '.join(extra))
     if 'replacedBy' in r:
@@ -1460,7 +1593,9 @@ def format_error(e):
 
 
 def summary(result):
-    return '%d rulings in %d docs, %d errors' % (len(result['rulings']), result['docCount'], len(result['errors']))
+    history = result.get('historyCount', 0)
+    docs = '%d docs (%d history files)' % (result['docCount'], history) if history else '%d docs' % result['docCount']
+    return '%d rulings in %s, %d errors' % (len(result['rulings']), docs, len(result['errors']))
 
 
 def enforcement_line(result):

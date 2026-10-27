@@ -16,7 +16,9 @@
     "kind",
     "date",
     "decision",
-    "doc"
+    "doc",
+    "file",
+    "line"
   ],
   "properties": {
     "id": {
@@ -40,6 +42,10 @@
         "docs/security.md",
         "docs/ui.md"
       ]
+    },
+    "file": {
+      "type": "string",
+      "pattern": "^docs/(history/)?[^/]+\\.md$"
     },
     "line": {
       "type": "integer",
@@ -99,6 +105,10 @@
     "enforced": {
       "type": "string",
       "pattern": "^[Rr][Ee][Vv][Ii][Ee][Ww]\\b"
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^docs/statements/[^/]+\\.md$"
     }
   },
   "$defs": {

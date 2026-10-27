@@ -38,7 +38,7 @@ FAILURES = {
         'docs/development.md:7  R-DEV-003  Replaces R-DEV-009, which does not exist',
     ],
     'replaced-one-way': [
-        'docs/development.md:4  R-DEV-001  Replaced → R-DEV-002, but R-DEV-002 does not list R-DEV-001 in Replaces',
+        'docs/history/development.md:4  R-DEV-001  Replaced → R-DEV-002, but R-DEV-002 does not list R-DEV-001 in Replaces',
     ],
     'missing-path': [
         'docs/development.md:3  R-DEV-001  Paths item "src/nope.js" does not exist',
@@ -48,7 +48,10 @@ FAILURES = {
     'path-outside-root': ['docs/development.md:3  R-DEV-001  Paths item "../valid/package.json" points outside the repo'],
     'impossible-date': ['docs/development.md:3  R-DEV-001  date 2026-02-30 is not a real calendar date'],
     'future-date': ['docs/development.md:3  R-DEV-001  date 2999-01-01 is in the future'],
-    'wrong-doc': ['docs/development.md:3  R-BILLING-001  area BILLING belongs in docs/billing.md, not docs/development.md'],
+    'wrong-doc': [
+        'docs/development.md:3  R-BILLING-001  area BILLING belongs in docs/billing.md or docs/history/billing.md,'
+        ' not docs/development.md',
+    ],
     'unknown-area': ["docs/development.md:3  R-FOO-001  area FOO is not in the schema's x-areas"],
     'malformed-id': ['docs/development.md:3  R-DEV-21  malformed ruling ID "R-DEV-21"; expected R-AREA-NNN'],
     'missing-id': [
@@ -100,8 +103,8 @@ FAILURES = {
         'docs/development.md:5  -  Replaced marker must be on the line right after the ruling it replaces',
         'docs/development.md:6  R-DEV-002  Replaces R-DEV-001, but R-DEV-001 has no "Replaced → R-DEV-002" marker',
     ],
-    'replaced-duplicate': ['docs/development.md:5  R-DEV-001  ruling has more than one Replaced marker'],
-    'replaced-future-date': ['docs/development.md:4  R-DEV-001  Replaced marker date 2999-01-01 is in the future'],
+    'replaced-duplicate': ['docs/history/development.md:5  R-DEV-001  ruling has more than one Replaced marker'],
+    'replaced-future-date': ['docs/history/development.md:4  R-DEV-001  Replaced marker date 2999-01-01 is in the future'],
     'self-replace': ['docs/development.md:3  R-DEV-001  ruling replaces itself'],
     'empty-field': ['docs/development.md:3  R-DEV-001  Why is empty'],
     'unquoted-item': ['docs/development.md:3  R-DEV-001  Paths items must be backtick-quoted, e.g. `src/x.js`'],
@@ -145,7 +148,71 @@ FAILURES = {
         'docs/rulings.schema.json:1  -  x-area-paths BILLING glob "src/{a,b}/*.py" uses unsupported glob syntax'
         ' ({} and [] are not supported)',
     ],
-    'replaced-dangling': ['docs/development.md:4  R-DEV-001  Replaced → R-DEV-009, which does not exist'],
+    'replaced-dangling': ['docs/history/development.md:4  R-DEV-001  Replaced → R-DEV-009, which does not exist'],
+    # Replaced rulings live in docs/history/<name>.md, rulings in force in docs/<name>.md.
+    'history-replaced-in-area': [
+        'docs/development.md:3  R-DEV-001  replaced ruling must move to docs/history/development.md',
+    ],
+    'history-unreplaced': [
+        'docs/history/development.md:3  R-DEV-001  ruling in history has no Replaced marker;'
+        ' rulings in force belong in docs/development.md',
+    ],
+    'history-orphan': ['docs/history/extra.md:1  -  docs/history/extra.md has no area doc docs/extra.md in x-areas'],
+    'history-wrong-area': [
+        'docs/history/development.md:3  R-BILLING-001  area BILLING belongs in docs/billing.md or'
+        ' docs/history/billing.md, not docs/history/development.md',
+    ],
+    # IDs are unique across area docs and history files. R-DEV-002's Replaces
+    # resolves to the first R-DEV-001, which has no marker.
+    'history-duplicate-id': [
+        'docs/development.md:5  R-DEV-002  Replaces R-DEV-001, but R-DEV-001 has no "Replaced → R-DEV-002" marker',
+        'docs/history/development.md:3  R-DEV-001  duplicate ID; first defined at docs/development.md:3',
+    ],
+    # Source: one file in docs/statements/ that mentions the ruling's ID.
+    'source': [
+        'docs/development.md:5  R-DEV-002  Source item "docs/statements/nope.md" does not exist',
+        'docs/development.md:7  R-DEV-003  Source must be a file in docs/statements/',
+        'docs/development.md:9  R-DEV-004  Source must be a file, not a glob',
+        'docs/development.md:11  R-DEV-005  Source must be one file',
+        'docs/development.md:14  R-DEV-006  Source "docs/statements/other.md" does not mention R-DEV-006',
+        'docs/development.md:16  R-DEV-007  Source "docs/statements/folder.md" is a directory;'
+        ' list a file in docs/statements/',
+    ],
+    # Source shapes: unquoted, empty item, `..`, a leading ./, a nested folder.
+    'source-shapes': [
+        'docs/development.md:3  R-DEV-001  Source must be backtick-quoted, e.g. `docs/statements/billing.md`',
+        'docs/development.md:5  R-DEV-002  Source has an empty item',
+        'docs/development.md:7  R-DEV-003  Source must be a file in docs/statements/',
+        'docs/development.md:9  R-DEV-004  Source must be a file in docs/statements/',
+        'docs/development.md:11  R-DEV-005  Source must be a file in docs/statements/',
+    ],
+    # A marked ruling left in the area doc and an unmarked one in a history file.
+    'history-misplaced': [
+        'docs/development.md:3  R-DEV-001  replaced ruling must move to docs/history/development.md',
+        'docs/history/development.md:3  R-DEV-003  ruling in history has no Replaced marker;'
+        ' rulings in force belong in docs/development.md',
+    ],
+    # A replaced ruling's Source is still checked on disk.
+    'history-source': [
+        'docs/history/development.md:3  R-DEV-001  Source item "docs/statements/nope.md" does not exist',
+        'docs/history/development.md:6  R-DEV-003  Source "docs/statements/development.md" does not mention R-DEV-003',
+    ],
+    # History files are parsed like area docs: a marker must follow its ruling
+    # directly, fenced code is skipped, lookalikes and unclosed fences are errors.
+    'history-marker-gap': [
+        'docs/development.md:3  R-DEV-002  Replaces R-DEV-001, but R-DEV-001 has no "Replaced → R-DEV-002" marker',
+        'docs/history/development.md:3  R-DEV-001  ruling in history has no Replaced marker;'
+        ' rulings in force belong in docs/development.md',
+        'docs/history/development.md:5  -  Replaced marker must be on the line right after the ruling it replaces',
+    ],
+    'history-fenced-code': ['docs/history/development.md:13  R-DEV-7  malformed ruling ID "R-DEV-7"; expected R-AREA-NNN'],
+    'history-unclosed-fence': ['docs/history/development.md:6  -  unclosed code fence'],
+    # BILLING is in x-areas, so its history file has an area doc in the schema;
+    # the missing doc is reported once, by the schema check.
+    'history-area-doc-missing': [
+        'docs/history/billing.md:4  R-BILLING-001  Replaced → R-BILLING-002, which does not exist',
+        'docs/rulings.schema.json:1  -  area BILLING: docs/billing.md does not exist',
+    ],
 }
 
 
@@ -176,7 +243,8 @@ class CheckRulingsTest(unittest.TestCase):
             'kind': 'ruled',
             'date': '2026-01-10',
             'doc': 'docs/development.md',
-            'line': 7,
+            'file': 'docs/history/development.md',
+            'line': 3,
             'decision': 'run the tests before every push.',
             'why': 'CI minutes are limited.',
             'covers': 'every worker.',
@@ -189,7 +257,8 @@ class CheckRulingsTest(unittest.TestCase):
             'kind': 'ruled',
             'date': '2026-03-01',
             'doc': 'docs/development.md',
-            'line': 11,
+            'file': 'docs/development.md',
+            'line': 7,
             'decision': 'a pre-push hook runs the tests.',
             'paths': ['scripts/pre-push.sh'],
             'replaces': ['R-DEV-001'],
@@ -199,13 +268,16 @@ class CheckRulingsTest(unittest.TestCase):
             'kind': 'parked',
             'date': '2026-04-02',
             'doc': 'docs/development.md',
-            'line': 14,
+            'file': 'docs/development.md',
+            'line': 10,
             'decision': 'a staging environment, until we have paying users.',
         })
         self.assertEqual(by_id['R-DEV-004']['kind'], 'asked')
         self.assertEqual(by_id['R-DEV-004']['paths'], ['src/?.js'])
         self.assertEqual(by_id['R-BILLING-003']['replaces'], ['R-BILLING-001', 'R-BILLING-002'])
         self.assertEqual(by_id['R-BILLING-001']['replacedBy'], {'id': 'R-BILLING-003', 'date': '2026-06-01'})
+        self.assertEqual((by_id['R-BILLING-001']['doc'], by_id['R-BILLING-001']['file']),
+                         ('docs/billing.md', 'docs/history/billing.md'))
 
         # Check every object against the fixture's own schema (the parts we use).
         with open(os.path.join(fixture('valid'), 'docs/rulings.schema.json'), encoding='utf-8') as f:
@@ -222,6 +294,8 @@ class CheckRulingsTest(unittest.TestCase):
             self.assertRegex(r['date'], date_re)
             self.assertIn(r['kind'], schema['properties']['kind']['enum'])
             self.assertIn(r['doc'], schema['properties']['doc']['enum'])
+            self.assertRegex(r['file'], schema['properties']['file']['pattern'])
+            self.assertIn(r['file'], (r['doc'], 'docs/history/' + r['doc'][len('docs/'):]))
             self.assertTrue(isinstance(r['line'], int) and not isinstance(r['line'], bool) and r['line'] >= 1)
             self.assertTrue(len(r['decision']) > 0)
             for k in ('paths', 'replaces', 'tests'):
@@ -249,6 +323,7 @@ class CheckRulingsTest(unittest.TestCase):
                 'kind': 'ruled',
                 'date': '2026-01-15',
                 'doc': 'docs/security.md',
+                'file': 'docs/security.md',
                 'line': 3,
                 'decision': (
                     "never look at secret values. No worker may see a secret's value: not in a secrets manager, "
@@ -296,9 +371,9 @@ class CheckRulingsTest(unittest.TestCase):
             )
 
         valid_report = (
-            'docs/development.md:11  R-DEV-002  note: not enforced; add Tests or Enforced: review\n'
+            'docs/development.md:7  R-DEV-002  note: not enforced; add Tests or Enforced: review\n'
             'Enforcement: 0 tested, 1 review-only, 1 not enforced (of 2 in-force rulings)\n'
-            '7 rulings in 2 docs, 0 errors\n'
+            '7 rulings in 2 docs (2 history files), 0 errors\n'
         )
         ok = run('--root', fixture('valid'))
         self.assertEqual(ok.returncode, 0)
@@ -412,14 +487,14 @@ class CheckRulingsTest(unittest.TestCase):
         self.assertEqual(result['enforcement'], {'tested': 2, 'review': 1, 'unenforced': 2, 'inForce': 5})
         self.assertEqual([format_error(n) for n in result['notes']], [
             'docs/development.md:9  R-DEV-004  note: not enforced; add Tests or Enforced: review',
-            'docs/development.md:14  R-DEV-006  note: not enforced; add Tests or Enforced: review',
+            'docs/development.md:11  R-DEV-006  note: not enforced; add Tests or Enforced: review',
         ])
         out = run_cli('--root', fixture('coverage'))
         self.assertEqual(out.returncode, 0)
         self.assertEqual(out.stdout.decode('utf-8'), '\n'.join(
             [format_error(n) for n in result['notes']]
             + ['Enforcement: 2 tested, 1 review-only, 2 not enforced (of 5 in-force rulings)',
-               '7 rulings in 2 docs, 0 errors', '']))
+               '7 rulings in 2 docs (1 history files), 0 errors', '']))
         js = run_cli('--root', fixture('coverage'), '--json')
         self.assertEqual(js.returncode, 0)
         self.assertIn('note: not enforced', js.stderr.decode('utf-8'))
@@ -441,6 +516,149 @@ class CheckRulingsTest(unittest.TestCase):
     def test_area_paths_valid(self):
         """x-area-paths with existing files and a matching glob -> 0 errors"""
         self.assertEqual(check_rulings(fixture('area-paths'))['errors'], [])
+
+    # --- history files and Source -------------------------------------------
+
+    def test_history_valid(self):
+        """history file: the replaced ruling and its marker there, the replacing one in the area doc -> 0 errors"""
+        result = check_rulings(fixture('history'))
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(result['docCount'], 2)
+        self.assertEqual(result['historyCount'], 1)
+        out = run_cli('--root', fixture('history'))
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout.decode('utf-8'), (
+            'Enforcement: 0 tested, 2 review-only, 0 not enforced (of 2 in-force rulings)\n'
+            '3 rulings in 2 docs (1 history files), 0 errors\n'
+        ))
+
+    def test_history_json_doc_and_file(self):
+        """--json: doc is the area doc, file is where the ruling sits, line is in file"""
+        by_id = {r['id']: r for r in check_rulings(fixture('history'))['rulings']}
+        old, new = by_id['R-BILLING-001'], by_id['R-BILLING-002']
+        self.assertEqual((old['doc'], old['file'], old['line']), ('docs/billing.md', 'docs/history/billing.md', 3))
+        self.assertEqual((new['doc'], new['file'], new['line']), ('docs/billing.md', 'docs/billing.md', 3))
+        self.assertEqual(list(new.keys())[3:6], ['doc', 'file', 'line'])
+        self.assertEqual(new['source'], 'docs/statements/billing.md')
+        self.assertEqual(list(new.keys())[-1], 'source')
+        js = run_cli('--root', fixture('history'), '--json')
+        self.assertEqual(json.loads(js.stdout.decode('utf-8')), check_rulings(fixture('history'))['rulings'])
+
+    def test_history_lookup_id(self):
+        """--id finds a replaced ruling in a history file and shows its file and line"""
+        out = run_cli('--root', fixture('history'), '--id', 'R-BILLING-001')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stderr.decode('utf-8'), '')
+        self.assertEqual(out.stdout.decode('utf-8'), (
+            'R-BILLING-001 · Ruled 2026-02-01 · docs/history/billing.md:3\n'
+            '  invoices are PDFs.\n'
+            '  Enforced: review\n'
+            '  Replaced 2026-06-01 → R-BILLING-002\n'
+        ))
+        js = run_cli('--root', fixture('history'), '--json', '--id', 'R-BILLING-001')
+        [r] = json.loads(js.stdout.decode('utf-8'))
+        self.assertEqual((r['doc'], r['file'], r['line']), ('docs/billing.md', 'docs/history/billing.md', 3))
+
+    def test_history_lookup_for_and_area_exclude(self):
+        """--for and --area leave out rulings in history files"""
+        self.assertEqual(self.ids_for('src/billing/invoices.py', root=fixture('history')), ['R-BILLING-002'])
+        self.assertEqual([r['id'] for r in lookup_rulings(fixture('history'), area='BILLING')['rulings']],
+                         ['R-BILLING-002'])
+
+    def test_lookup_shows_source(self):
+        """lookup text output names the Source file on the fields line, after Enforced"""
+        out = run_cli('--root', fixture('history'), '--area', 'BILLING')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout.decode('utf-8'), (
+            'R-BILLING-002 · Ruled 2026-06-01 · docs/billing.md:3\n'
+            '  invoices are HTML.\n'
+            '  Enforced: review · Source: `docs/statements/billing.md`\n'
+            '\n'
+            '1 rulings in area BILLING\n'
+        ))
+
+    def test_source_lower_case_underscore_passes(self):
+        """Source mentioning the ID in lower case with underscores passes and is stored"""
+        result = check_rulings(fixture('source'))
+        by_id = {r['id']: r for r in result['rulings']}
+        self.assertEqual(by_id['R-DEV-001']['source'], 'docs/statements/development.md')
+        self.assertNotIn('R-DEV-001', [e['id'] for e in result['errors']])
+        # Invalid Source values are not stored; statement files are not docs.
+        for rid in ('R-DEV-003', 'R-DEV-004', 'R-DEV-005'):
+            self.assertNotIn('source', by_id[rid], rid)
+        self.assertEqual(result['docCount'], 2)
+        # Source never counts as enforcement.
+        self.assertEqual(result['enforcement']['unenforced'], 7)
+
+    def test_history_lookup_in_force_only(self):
+        """--for and --area leave out a marked ruling in an area doc and an unmarked one in history; --id finds both"""
+        root = fixture('history-misplaced')
+        self.assertEqual(self.ids_for('src/a.js', root=root), ['R-DEV-002'])
+        result = lookup_rulings(root, area='DEV')
+        self.assertEqual([r['id'] for r in result['rulings']], ['R-DEV-002'])
+        self.assertEqual(result['problems'], 2)
+        for rid, file in (('R-DEV-001', 'docs/development.md'), ('R-DEV-003', 'docs/history/development.md')):
+            [r] = lookup_rulings(root, rid=rid)['rulings']
+            self.assertEqual(r['file'], file)
+        out = run_cli('--root', root, '--for', 'src/a.js')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stderr.decode('utf-8'),
+                         'warning: the rulings docs have 2 problems; run python3 scripts/check_rulings.py\n')
+
+    def test_history_paths_tests_not_checked(self):
+        """a replaced ruling whose Paths and Tests no longer exist -> 0 errors, and it is not counted in coverage"""
+        result = check_rulings(fixture('history-stale'))
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(result['enforcement'], {'tested': 0, 'review': 1, 'unenforced': 0, 'inForce': 1})
+        old = {r['id']: r for r in result['rulings']}['R-DEV-001']
+        self.assertEqual(old['paths'], ['src/gone.js', 'src/gone/**/*.js'])
+        self.assertEqual(old['tests'], ['tests/gone.test.js'])
+        self.assertFalse(os.path.exists(os.path.join(fixture('history-stale'), 'src')))
+
+    def test_history_readme_ignored(self):
+        """docs/history/README.md is not a history file"""
+        root = fixture('history-stale')
+        self.assertTrue(os.path.isfile(os.path.join(root, 'docs', 'history', 'README.md')))
+        result = check_rulings(root)
+        self.assertEqual(result['historyCount'], 1)
+        self.assertEqual(sorted(r['file'] for r in result['rulings']),
+                         ['docs/development.md', 'docs/history/development.md'])
+        self.assertEqual(lookup_rulings(root, area='DEV')['problems'], 0)
+
+    def test_lookup_warns_on_source_shape(self):
+        """lookup counts Source shape errors as problems"""
+        self.assertEqual(lookup_rulings(fixture('source-shapes'), area='DEV')['problems'], 5)
+        out = run_cli('--root', fixture('source-shapes'), '--area', 'DEV')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stderr.decode('utf-8'),
+                         'warning: the rulings docs have 5 problems; run python3 scripts/check_rulings.py\n')
+        by_id = {r['id']: r for r in check_rulings(fixture('source-shapes'))['rulings']}
+        for rid in ('R-DEV-001', 'R-DEV-002', 'R-DEV-003', 'R-DEV-004', 'R-DEV-005'):
+            self.assertNotIn('source', by_id[rid], rid)
+
+    def test_source_symlink(self):
+        """Source must resolve to a file in docs/statements/: a symlink out of it fails, one within it passes"""
+        tmp = tempfile.mkdtemp(prefix='check-rulings-')
+        try:
+            repo = os.path.join(tmp, 'repo')
+            shutil.copytree(fixture('history'), repo)
+            statement = os.path.join(repo, 'docs', 'statements', 'billing.md')
+            moved = os.path.join(repo, 'notes.md')
+            os.rename(statement, moved)
+            try:
+                os.symlink(os.path.join('..', '..', 'notes.md'), statement)
+            except (OSError, NotImplementedError, AttributeError):
+                self.skipTest('symlinks not supported')
+            self.assertEqual([format_error(e) for e in check_rulings(repo)['errors']], [
+                'docs/billing.md:3  R-BILLING-002  Source "docs/statements/billing.md" must resolve to a file'
+                ' in docs/statements/',
+            ])
+            os.remove(statement)
+            os.rename(moved, os.path.join(repo, 'docs', 'statements', 'real.md'))
+            os.symlink('real.md', statement)
+            self.assertEqual(check_rulings(repo)['errors'], [])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     # --- lookup -------------------------------------------------------------
 
@@ -492,7 +710,7 @@ class CheckRulingsTest(unittest.TestCase):
         out = run_cli('--root', fixture('area-paths'), '--id', 'R-BILLING-001')
         self.assertEqual(out.returncode, 0)
         self.assertEqual(out.stdout.decode('utf-8'), (
-            'R-BILLING-001 · Ruled 2026-02-01 · docs/billing.md:3\n'
+            'R-BILLING-001 · Ruled 2026-02-01 · docs/history/billing.md:3\n'
             '  invoices are PDFs.\n'
             '  Enforced: review\n'
             '  Replaced 2026-06-01 → R-BILLING-003\n'
@@ -629,18 +847,18 @@ class CheckRulingsTest(unittest.TestCase):
         self.assertEqual(rulings[0]['replacedBy'], {'id': 'R-BILLING-003', 'date': '2026-06-01'})
 
     def test_lookup_does_not_walk(self):
-        """lookup never lists the repo's files or checks Paths/Tests on disk"""
+        """lookup never lists the repo's files, checks Paths/Tests/Source on disk or reads docs/statements/"""
         def boom(*a, **k):
             raise AssertionError('lookup must not walk the repo')
 
         saved = checker.list_files, checker.check_path_item, checker._mentions
         checker.list_files = checker.check_path_item = checker._mentions = boom
-        # A test file must never be opened either.
+        # A test file or an owner statement must never be opened either.
         real_read_text = checker._read_text
 
         def read_text(full):
-            rel = os.path.relpath(full, fixture('.')).replace(os.sep, '/')
-            if '/docs/' not in '/' + rel.split('/', 1)[-1]:
+            rel = '/' + os.path.relpath(full, fixture('.')).replace(os.sep, '/').split('/', 1)[-1]
+            if not rel.startswith('/docs/') or rel.startswith('/docs/statements/'):
                 raise AssertionError('lookup read %s' % full)
             return real_read_text(full)
 
@@ -653,6 +871,14 @@ class CheckRulingsTest(unittest.TestCase):
             self.assertEqual(lookup_rulings(fixture('tests-mention'), area='DEV')['problems'], 0)
             self.assertEqual(len(lookup_rulings(fixture('area-paths'), area='DEV')['rulings']), 2)
             self.assertEqual(len(lookup_rulings(fixture('area-paths'), rid='R-DEV-001')['rulings']), 1)
+            # History files are read; statement files never are.
+            history = lookup_rulings(fixture('history'), rid='R-BILLING-001')
+            self.assertEqual(history['rulings'][0]['file'], 'docs/history/billing.md')
+            self.assertEqual(history['problems'], 0)
+            self.assertEqual(lookup_rulings(fixture('history'), area='BILLING')['rulings'][0]['source'],
+                             'docs/statements/billing.md')
+            self.assertEqual(self.ids_for('src/billing/invoices.py', root=fixture('history')), ['R-BILLING-002'])
+            self.assertEqual(len(lookup_rulings(fixture('source'), area='DEV')['rulings']), 7)
         finally:
             checker.list_files, checker.check_path_item, checker._mentions = saved
             checker._read_text = real_read_text

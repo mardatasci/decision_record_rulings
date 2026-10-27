@@ -1,0 +1,7 @@
+# Development: replaced rulings
+
+**R-DEV-001 · Ruled by owner 2026-01-10:** old rule.
+**Replaced 2026-02-10 → R-DEV-002:** superseded.
+
+```js
+**R-DEV-21 · Ruled by owner someday:** hidden in the open fence.
