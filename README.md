@@ -25,7 +25,7 @@ A ruling looks like this:
 |------|------------|
 | [`CLAUDE_RULINGS-GUIDE.md`](CLAUDE_RULINGS-GUIDE.md) | The full write-up for **Claude Code**: `CLAUDE.md` with `@docs/development.md`, plus a `/ruling` skill that follows the "Recording a ruling" procedure in `docs/RULINGS.md`. |
 | [`CODEX_RULINGS-GUIDE.md`](CODEX_RULINGS-GUIDE.md) | The same system for **Codex**: a short `AGENTS.md`, folder-level `AGENTS.md` files as a safety layer for a few high-risk folders, and the "Recording a ruling" procedure in `docs/RULINGS.md`. |
-| [`STARTER_PROMPT_CLAUDE.md`](STARTER_PROMPT_CLAUDE.md) | The prompt to paste into **Claude Code**, opened in your target repo (new or existing), to set this up one approved step at a time. It tells the agent where to find this kit. |
+| [`STARTER_PROMPT_CLAUDE.md`](STARTER_PROMPT_CLAUDE.md) | The prompt to paste into **Claude Code**, opened in your target repo (new or existing), to set this up one approved step at a time. It tells the agent where to find this repo. |
 | [`STARTER_PROMPT_CODEX.md`](STARTER_PROMPT_CODEX.md) | The same prompt for **Codex**. |
 | [`reference/`](reference/) | A reference checker: `scripts/check_rulings.py`, its schema, tests and sample docs. Copy it into your repo and change the area list. |
 
@@ -33,8 +33,8 @@ Each guide covers the file layout, the ruling format and its fields, the validit
 
 ## How to use it
 
-1. Open your target repo (new or existing) in Claude Code or Codex. Don't run the prompt from inside this kit.
-2. Paste the matching starter prompt: `STARTER_PROMPT_CLAUDE.md` or `STARTER_PROMPT_CODEX.md`. No attachment is needed; the agent clones this kit into a temporary directory, or uses your local clone if you set the prompt's `Kit location:` line to its path.
+1. Open your target repo (new or existing) in Claude Code or Codex. Don't run the prompt from inside this repo.
+2. Paste the matching starter prompt: `STARTER_PROMPT_CLAUDE.md` or `STARTER_PROMPT_CODEX.md`. No attachment is needed; the agent clones this repo into a temporary directory, or uses your local clone if you set the prompt's `Owner-rulings repo:` line to its path.
 3. Approve each step as it goes. The agent inventories your existing docs first, then asks you to settle conflicts one at a time. Only you make rulings.
 
 ## Credits
