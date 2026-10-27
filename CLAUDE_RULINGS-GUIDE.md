@@ -35,10 +35,18 @@ tests/…                          # the tests that enforce rulings: ordinary te
 
 - CLAUDE.md is loaded into every session, including subagents, so it stays short. It loads the cross-cutting rulings with one line, @docs/development.md, and has a "Never miss these" list for the few rules every session must see, such as safety rules. docs/development.md is loaded every session too, so it holds only the cross-cutting rulings.
 - The format and the recording procedure are in docs/RULINGS.md. Only the /ruling skill reads it, when a ruling is recorded.
-- Area rulings are read on demand. CLAUDE.md says: "Before working on an area, find its doc in docs/README.md and read it; its rulings apply."
-- Before editing a file, Claude runs `python3 scripts/check_rulings.py --for <file>` from the repo root. It prints every ruling in force whose Paths match that file, plus every ruling in force of the areas whose x-area-paths match it. Ruled ones bind; Parked and Asked ones are shown for context. It reads only the docs, so it takes a fraction of a second.
+- Claude reads docs only when the task needs them. CLAUDE.md says so, and that docs/README.md is an index for finding a specific doc, not a reading list. docs/development.md is already loaded via @import; it isn't re-read.
+- Area rulings reach Claude through `--for`, not by reading docs. Before editing a file, Claude runs `python3 scripts/check_rulings.py --for <file>` from the repo root. It prints every ruling in force whose Paths match that file, plus every ruling in force of the areas whose x-area-paths match it. Ruled ones bind; Parked and Asked ones are shown for context. It reads only the docs, so it takes a fraction of a second. For a change across a whole area, `--area <AREA>` prints that area's rulings.
+- Don't map the cross-cutting area to `"."` in x-area-paths: its rulings are already loaded via @import, so `--for` would only print them again.
 - `--for` shows only rulings in force, never a replaced one or one in a history file, so Claude sees only rules in force. A lookup shows a ruling's Source; Claude follows the ruling and opens its owner words in docs/owner-words/ only when the ruling is unclear.
 - "The repository is the memory." Claude keeps no private memory notes outside the repo; anything worth keeping is written into docs/.
+- If the repo has other reference docs (a roadmap, a spec, a defect taxonomy …), list them in CLAUDE.md as an index, each with a "read only when …" condition, never as "always read":
+
+```markdown
+- docs/roadmap.md: read only when asked about plans or priorities.
+- docs/spec.md: read only when changing behaviour the spec defines.
+- docs/defect-taxonomy.md: read only when classifying or triaging a defect.
+```
 
 Example CLAUDE.md:
 
@@ -60,11 +68,15 @@ recording one are in `docs/RULINGS.md`. The index of every area doc is
   environment variables, files or logs. If a step needs one, stop and tell
   the owner.
 
-## Before working on an area
+## Docs and rulings
 
-Find its doc in `docs/README.md` and read it; its rulings apply. Before
-editing a file, run `python3 scripts/check_rulings.py --for <file>` from the
-repo root; every Ruled ruling it prints applies.
+Read docs only when the task needs them. For a question, answer from the code
+and what you already know; open a doc only if the question is about it.
+`docs/README.md` is an index for finding a specific doc, not a reading list;
+`docs/development.md` is already loaded above. Before editing a file, run
+`python3 scripts/check_rulings.py --for <file>` from the repo root; every
+Ruled ruling it prints applies. For a change across a whole area, use
+`--area <AREA>`.
 
 ## Before calling a change done
 
@@ -306,7 +318,7 @@ step.
 3. Write each confirmed decision into its area doc as a ruling with an ID. If the doc text is the owner's own words, quote it exactly. Otherwise date the ruling with its original decision date, and leave it unquoted only if that date is before x-quotes-since (the date noted in step 1); if it isn't, ask the owner to state the decision so it can be quoted. If a decision's original date isn't in the docs or git history, ask the owner; never guess. Show the owner each quote and ask whether it's theirs, as in recording step 1. Never present AI wording as the owner's. Put longer context in the owner's words in docs/owner-words/<area>.md and link it with Source. Rulings that are already outdated go into docs/history/<area>.md with Replaced → markers, each with the ruling in force that replaces it listing it in Replaces; if no ruling replaces one, ask the owner. Never delete them.
 4. For each Ruled ruling, propose a test that would fail if code broke it, or Enforced: review for a judgment call. One at a time; the owner approves each.
 5. Copy the schema, the checker and its tests from reference/, set x-quotes-since in the schema to the date noted in step 1, and create docs/RULINGS.md (the format and the recording procedure). Also check existing docs/history/ and docs/owner-words/ folders; if they hold files that aren't ruling history or owner words, ask the owner how to handle them (for example, move them to docs/notes/).
-6. Slim CLAUDE.md so it points to docs/, and add the --for rule.
+6. Slim CLAUDE.md so it points to docs/, and add the --for rule. Remove any instruction that makes the agent read docs on every task or question (e.g. "before any work, read …"); replace it with the "read docs only when the task needs them" rule and an index of reference docs with "read only when …" conditions.
 7. Add CI.
 8. Create the /ruling skill.
 
@@ -329,7 +341,7 @@ Work one step at a time and wait for my approval between steps:
 3. Write each decision I confirm as a ruling with an ID. If the doc text is my own words, quote it exactly. Otherwise date the ruling with its original decision date, and leave it unquoted only if that date is before x-quotes-since (the date noted in step 1); if it isn't, ask me to state the decision so you can quote it. If a decision's original date isn't in the docs or git history, ask me; never guess. Show me each quote and ask whether it's mine, as in recording step 1. Never present your wording as mine. Put longer context in my exact words in docs/owner-words/<area>.md and link it with Source. Put rulings that are already outdated into docs/history/<area>.md with Replaced → markers, each with the ruling in force that replaces it listing it in Replaces; if no ruling replaces one, ask me. Never delete them.
 4. For each Ruled ruling, propose a test that would fail if code broke it (named after the ruling's ID) or Enforced: review for a judgment call, one at a time. After I approve one, write it and link it.
 5. Copy the checker from the owner-rulings repo; don't write one from scratch: reference/scripts/check_rulings.py into scripts/, the contents of reference/tests/ into tests/ (so you end up with tests/test_check_rulings.py and tests/fixtures/), and reference/docs/rulings.schema.json into docs/. Then edit only x-areas, the ID pattern and the doc enum for this repo, add the x-area-paths I approved, and add "x-quotes-since" set to the date noted in step 1. Its tests run on sample docs only. Keep the test folder and script folder as siblings: the copied test finds the script at ../scripts/check_rulings.py. If I choose another location, update the CI command and any later references to match. Every top-level docs/*.md other than README.md and RULINGS.md must be an area in x-areas; for each existing doc that isn't, ask me whether to make it an area or move it to a subfolder such as docs/notes/. docs/history/ may hold only history files of area docs (plus README.md and RULINGS.md) and docs/owner-words/ only owner words; for each existing file there that isn't one, ask me how to handle it, for example move it to docs/notes/. Create docs/RULINGS.md with the ruling format, the field table and the section "Recording a ruling" (the recording procedure) from the guide; keep docs/development.md to the cross-cutting rulings only. If the repo has a JS/TS test runner, linter or type-checker, exclude tests/fixtures/ from it and show me the change. Then run python3 scripts/check_rulings.py and python3 -m unittest discover -s tests and show me both outputs.
-6. Make CLAUDE.md short: @docs/development.md, a "Never miss these" list, and the --for and review rules from the guide's example CLAUDE.md.
+6. Make CLAUDE.md short: @docs/development.md, a "Never miss these" list, and the docs, --for and review rules from the guide's example CLAUDE.md. Remove any instruction that makes the agent read docs on every task or question (e.g. 'before any work, read …'); replace it with the 'read docs only when the task needs them' rule and an index of reference docs with 'read only when …' conditions. Show me each removed line.
 7. Add the checker to CI as its own last step with if: ${{ !cancelled() }}, not inside the deploy gate. Also run python3 -m unittest discover -s tests in CI so the checker's own tests run. Make sure the repo's existing test suite runs the ruling tests; they're ordinary tests and gate deploys like any other test. Only the format checker stays outside the deploy gate.
 8. Create the /ruling skill in .claude/skills/ruling/SKILL.md as shown in the guide; it points to the section "Recording a ruling" in docs/RULINGS.md.
 

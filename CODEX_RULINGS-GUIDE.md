@@ -20,7 +20,7 @@ A ruling is a decision made by the project owner, written into the doc for the a
 AGENTS.md                        # entry point Codex reads every session; short, points to docs/
 <folder>/AGENTS.md               # optional safety layer for a high-risk folder (e.g. infra/AGENTS.md)
 docs/README.md                   # index of every area doc
-docs/development.md              # cross-cutting rulings only; read every session
+docs/development.md              # cross-cutting rulings only; not read routinely, reaches Codex through --for
 docs/RULINGS.md                  # the ruling format, its fields and the recording procedure
 docs/<area>.md                   # one doc per area: ai.md, billing.md, security.md, ui.md …
 docs/history/<area>.md           # that area's replaced rulings, each with its Replaced → marker
@@ -33,26 +33,34 @@ tests/…                          # the tests that enforce rulings: ordinary te
 
 ## How Codex finds the rulings
 
-- AGENTS.md is read automatically, but it can't load other files the way CLAUDE.md can. So it tells Codex what to read, and copies only the few rules that must never be missed.
-- Keep AGENTS.md short. Codex reads only a limited amount of it (around 32 KB by default, adjustable in Codex's config), so long text at the bottom can be cut off. Put the pointers and the hard rules at the top.
-- docs/development.md is read every session, so it holds only the cross-cutting rulings. The format and the recording procedure are in docs/RULINGS.md, read only when a ruling is recorded.
-- Before editing a file, Codex runs `python3 scripts/check_rulings.py --for <file>` from the repo root. It prints every ruling in force whose Paths match that file, plus every ruling in force of the areas whose x-area-paths match it. Ruled ones bind; Parked and Asked ones are shown for context. It reads only the docs, so it takes a fraction of a second.
-- `--for` is the primary per-file lookup. Folder-level AGENTS.md files are an extra safety layer for a few high-risk folders: Codex reads them when it works in that folder, so their must-not-miss rulings load even if it forgets to run `--for`. For example, infra/AGENTS.md can say "Read docs/security.md before any change here."
+- AGENTS.md is read automatically, but it can't load other files the way CLAUDE.md can. It tells Codex when to look rulings up, and copies only the few rules that must never be missed.
+- Codex treats every question as work and follows any "before any work, read …" line literally, so AGENTS.md never tells it to read docs on every task. It reads docs only when the task needs them; docs/README.md is an index for finding a specific doc, not a reading list.
+- Keep AGENTS.md short. Codex reads only a limited amount of it (around 32 KB by default, adjustable in Codex's config), so long text at the bottom can be cut off. Put the lookup rules and the hard rules at the top.
+- Rulings reach Codex through `--for`, not by reading docs. Before editing a file, Codex runs `python3 scripts/check_rulings.py --for <file>` from the repo root. It prints every ruling in force whose Paths match that file, plus every ruling in force of the areas whose x-area-paths match it. Ruled ones bind; Parked and Asked ones are shown for context. It reads only the docs, so it takes a fraction of a second. For a change across a whole area, `--area <AREA>` prints that area's rulings.
+- Map the cross-cutting area (DEV, docs/development.md) to `"."` in x-area-paths, e.g. `"DEV": ["."]`. `"."` matches every file, so `--for` on any file includes the cross-cutting rulings and Codex never needs to read docs/development.md itself. docs/development.md still holds only the cross-cutting rulings. The format and the recording procedure are in docs/RULINGS.md, read only when a ruling is recorded.
+- `--for` is the primary per-file lookup. Folder-level AGENTS.md files are an extra safety layer for a few high-risk folders: Codex reads them when it works in that folder. They hold a reminder to run `--for` plus the one or two must-never-miss rulings inline, so those rules load even if it forgets to run `--for`. They never tell Codex to read a doc.
 - `--for` shows only rulings in force, never a replaced one or one in a history file, so Codex sees only rules in force. A lookup shows a ruling's Source; Codex follows the ruling and opens its owner words in docs/owner-words/ only when the ruling is unclear.
 - "The repository is the memory." Anything worth keeping goes into docs/, not into a chat or a private note.
+- If the repo has other reference docs (a roadmap, a spec, a defect taxonomy …), list them in AGENTS.md as an index, each with a "read only when …" condition, never as "always read":
+
+```markdown
+- docs/roadmap.md: read only when asked about plans or priorities.
+- docs/spec.md: read only when changing behaviour the spec defines.
+- docs/defect-taxonomy.md: read only when classifying or triaging a defect.
+```
 
 Example top of AGENTS.md:
 
 ```markdown
 ## Documentation and owner rulings
 
-- Before any work, read docs/README.md and docs/development.md.
-- Rulings in docs/ apply and are not re-asked. Cross-cutting rulings are in
-  docs/development.md; area rulings are in each area's doc. Read the doc for
-  the area you are working in before acting. Only the owner may make, park
-  or replace a ruling.
+- Read docs only when the task needs them. For a question, answer from the code
+  and what you already know; open a doc only if the question is about it.
+  docs/README.md is an index for finding a specific doc, not a reading list.
 - Before editing a file, run `python3 scripts/check_rulings.py --for <file>`
-  from the repo root; every Ruled ruling it prints applies.
+  from the repo root; every Ruled ruling it prints applies, including the
+  cross-cutting ones. For a change across a whole area, use `--area <AREA>`.
+- Rulings are not re-asked. Only the owner may make, park or replace a ruling.
 - Before calling a change done, run `--for` on each changed file and check
   the diff against every printed ruling marked `Enforced: review`; run the
   tests listed in Tests.
@@ -67,10 +75,14 @@ Example top of AGENTS.md:
 - Do only the task that is assigned.
 ```
 
+The cross-cutting rulings arrive through `--for` because the schema maps the cross-cutting area to `"."` (see above), so this file needs no line that reads docs/development.md.
+
 Example infra/AGENTS.md:
 
 ```markdown
-Read docs/security.md before any change in this folder. Its rulings apply.
+Before changing files here, run `python3 scripts/check_rulings.py --for <file>`.
+
+- Never look at a secret's value (R-SECURITY-001).
 ```
 
 ## The format
@@ -92,7 +104,7 @@ The format, the field table and the recording procedure go in docs/RULINGS.md. T
 | Decision | yes | The owner's exact words, in quotes, copied character for character. Never written or reworded by AI. |
 | Why | no | The owner's reason in their words, in quotes, only if the owner gave one. |
 | Covers | no | What it applies to, in words. |
-| Paths | no | Files or globs it governs. `--for` prints this ruling for any file they match. For a high-risk folder, also put its must-not-miss rulings in a folder AGENTS.md. |
+| Paths | no | Files or globs it governs. `--for` prints this ruling for any file they match. For a high-risk folder, also add a folder AGENTS.md with a reminder to run `--for` plus its one or two must-never-miss rulings inline, not an instruction to read a doc. |
 | Replaces | no | The ID(s) of the ruling(s) it replaces. |
 | Tests | no | Test files that would fail if code broke it. Each must mention the ruling's ID, in any case, with `-` or `_` between the parts, e.g. `R-BILLING-004` or `R_BILLING_004`; for a glob, at least one matched file must. A directory or a file in docs/ is not a valid Tests item. |
 | Enforced | no | `review` (any case), optionally followed by a note. For a judgment call no test can check; it is checked in review. |
@@ -279,9 +291,9 @@ Only the owner makes rulings. A worker's proposal never becomes a ruling, and "t
 ## How we set it up (order of work)
 
 1. Inventory every doc. Resolve conflicting decisions with the owner, one at a time. Note today's date; it becomes x-quotes-since when the schema is created in step 5.
-2. Propose the areas, with the code each one governs (x-area-paths), and get the owner's approval, then create docs/README.md, docs/development.md (cross-cutting rulings only) and one doc per approved area.
+2. Propose the areas, with the code each one governs (x-area-paths; map the cross-cutting area to `"."` so `--for` on any file includes its rulings), and get the owner's approval, then create docs/README.md, docs/development.md (cross-cutting rulings only) and one doc per approved area.
 3. Write each confirmed decision into its area doc as a ruling with an ID. If the doc text is the owner's own words, quote it exactly. Otherwise date the ruling with its original decision date, and leave it unquoted only if that date is before x-quotes-since (the date noted in step 1); if it isn't, ask the owner to state the decision so it can be quoted. If a decision's original date isn't in the docs or git history, ask the owner; never guess. Show the owner each quote and ask whether it's theirs, as in recording step 1. Never present AI wording as the owner's. Put longer context in the owner's words in docs/owner-words/<area>.md and link it with Source. Rulings that are already outdated go into docs/history/<area>.md with Replaced → markers, each with the ruling in force that replaces it listing it in Replaces; if no ruling replaces one, ask the owner. Never delete them.
 4. For each Ruled ruling, propose a test that would fail if code broke it, or Enforced: review for a judgment call. One at a time; the owner approves each.
 5. Copy the schema, the checker and its tests from reference/, set x-quotes-since in the schema to the date noted in step 1, and create docs/RULINGS.md (the format and the recording procedure). Also check existing docs/history/ and docs/owner-words/ folders; if they hold files that aren't ruling history or owner words, ask the owner how to handle them (for example, move them to docs/notes/).
-6. Slim AGENTS.md so it points to docs/, keeping only the hard rules in it, and add the --for rule. Add folder AGENTS.md files for a few high-risk folders as a safety layer.
+6. Slim AGENTS.md, keeping only the hard rules in it, and add the --for rule. Remove any instruction that makes the agent read docs on every task or question (e.g. "before any work, read …"); replace it with the "read docs only when the task needs them" rule and an index of reference docs with "read only when …" conditions. Add folder AGENTS.md files for a few high-risk folders as a safety layer: a reminder to run --for plus their one or two must-never-miss rulings inline.
 7. Add CI.
