@@ -20,14 +20,21 @@
 #
 # Area docs (docs/<name>.md) hold the rulings in force. A replaced ruling moves,
 # with its Replaced marker, to the area's history file docs/history/<name>.md.
-# A ruling's Source names the file in docs/statements/ that keeps the owner's
+# A ruling's Source names the file in docs/owner-words/ that keeps the owner's
 # exact words; that file must mention the ruling's ID. History is never
 # reworded, so the Paths and Tests of replaced rulings are not checked on disk;
 # their Source still is.
 #
+# Owner quotes: if the schema sets "x-quotes-since": "YYYY-MM-DD", every ruling
+# (any kind, in an area doc or a history file) dated on or after that day must
+# have its decision, and its Why if it has one, in quotes: the owner's exact
+# words, never written or reworded by AI. Rulings dated before it are not
+# checked.
+#
 # Full check (no lookup option): prints, in this order, one line per problem,
-# `docs/x.md:LINE  R-ID  message`, then a note line for each in-force ruling
-# with neither Tests nor Enforced, then
+# `docs/x.md:LINE  R-ID  message`, then a note line if x-quotes-since is not
+# set, then a note line for each in-force ruling with neither Tests nor
+# Enforced, then
 # `Enforcement: T tested, V review-only, U not enforced (of K in-force rulings)`
 # and `N rulings in M docs, E errors` (`N rulings in M docs (H history files),
 # E errors` when there are history files). Notes never count as errors. A
@@ -36,7 +43,7 @@
 #
 # Lookup (run it from the repo root, or pass --root, before editing a file; it
 # reads only the schema, the area docs and the history files, never walks the
-# repo, never reads docs/statements/ and never checks Paths/Tests/Source on
+# repo, never reads docs/owner-words/ and never checks Paths/Tests/Source on
 # disk):
 #   --for <path>  Rulings that apply to the file: a Paths item matches it, or
 #                 it falls under the x-area-paths of the ruling's area. May
@@ -54,9 +61,9 @@
 #   docs/). If the docs have problems that the docs alone show, a warning with
 #   their count goes to stderr and results still print. Those are: rules 1, 2,
 #   4 and 5; the placement rule (in force in the area doc, replaced in its
-#   history file); malformed rulings, fields and Replaced markers, including a
-#   Source that is not one backtick-quoted file in docs/statements/; unclosed
-#   code fences; and the schema (its own shape, a doc without an area, an area
+#   history file); owner quotes (x-quotes-since); malformed rulings, fields
+#   and Replaced markers, including a Source that is not one backtick-quoted
+#   file in docs/owner-words/; unclosed code fences; and the schema (its own shape, a doc without an area, an area
 #   without a doc, a history file without an area doc).
 #
 # Zero dependencies: Python 3.8+ standard library only.
@@ -75,7 +82,10 @@ SCHEMA_PATH = 'docs/rulings.schema.json'
 FIELDS = ['Why', 'Covers', 'Paths', 'Replaces', 'Tests', 'Enforced', 'Source']
 RESERVED_DOCS = ('README.md', 'RULINGS.md')  # in docs/ and docs/history/, never rulings files
 HISTORY_DIR = 'docs/history'  # docs/history/<name>.md: replaced rulings of docs/<name>.md
-SOURCE_RE = re.compile(r'^docs/statements/[^/]+\.md\Z')  # a Source item
+SOURCE_RE = re.compile(r'^docs/owner-words/[^/]+\.md\Z')  # a Source item
+QUOTES_SINCE_NOTE = 'note: x-quotes-since is not set; owner quotes are not checked'
+OPEN_QUOTES = ('"', '\u201c')  # " and left double quotation mark
+CLOSE_QUOTES = ('"', '\u201d')  # " and right double quotation mark
 KIND_WORDS = {'ruled': 'Ruled', 'parked': 'Parked', 'asked': 'Asked'}
 KINDS = {'Ruled': 'ruled', 'Parked': 'parked', 'Asked': 'asked'}
 SKIP_DIRS = {'.git', 'node_modules'}
@@ -601,6 +611,18 @@ def date_problem(date, today):
     return None
 
 
+def is_quoted(text):
+    """
+    True if the text is in quotes: after trimming, it starts with " or \u201c
+    and ends with " or \u201d, optionally followed by one ".", with at least one
+    non-whitespace character between the quotes. Inner quotes are allowed.
+    """
+    t = js_trim(text)
+    if t.endswith('.'):
+        t = t[:-1]
+    return len(t) >= 3 and t[0] in OPEN_QUOTES and t[-1] in CLOSE_QUOTES and js_trim(t[1:-1]) != ''
+
+
 def glob_to_regexp(glob):
     """Converts a glob with *, ** and ? into a regex over posix relative paths (UTF-16 units)."""
     glob = _utf16_units(glob)
@@ -672,7 +694,7 @@ def describe_diff(missing, extra):
     return ' and '.join(parts)
 
 
-def read_schema(root, errors):
+def read_schema(root, errors, today):
     """Reads the schema and checks its three area lists agree."""
 
     def err(message):
@@ -747,7 +769,22 @@ def read_schema(root, errors):
                     err('x-area-paths: area %s must map to a non-empty list of non-empty strings' % area)
                 else:
                     area_paths[area] = items
-    return {'areas': areas, 'areaPaths': area_paths}
+
+    # Optional x-quotes-since: "YYYY-MM-DD", a real date, not in the future.
+    # From that day on, decisions and Why must be the owner's words in quotes.
+    quotes_since = None
+    raw = _js_get(schema, 'x-quotes-since')
+    if raw is not UNDEFINED:
+        if not isinstance(raw, str):
+            err('x-quotes-since must be a YYYY-MM-DD date string, got %s' % js_to_string(js_stringify(raw)))
+        else:
+            dp = date_problem(raw, today)
+            if dp:
+                err('x-quotes-since: %s' % dp)
+            else:
+                quotes_since = raw
+    return {'areas': areas, 'areaPaths': area_paths, 'quotesSince': quotes_since,
+            'quotesSinceSet': raw is not UNDEFINED}
 
 
 def parse_doc(file, text, errors, today, doc=None):
@@ -987,11 +1024,11 @@ def parse_fields(ruling, body, err):
             if good:
                 ruling['replaces'] = _dedupe(good)
         elif name == 'Source':
-            # One file in docs/statements/; it is checked on disk in the full check.
+            # One file in docs/owner-words/; it is checked on disk in the full check.
             items, leftover = backtick_items(value)
             non_empty = [x for x in items if x]
             if leftover or not items:
-                at('Source must be backtick-quoted, e.g. `docs/statements/billing.md`')
+                at('Source must be backtick-quoted, e.g. `docs/owner-words/billing.md`')
             elif len(non_empty) != len(items):
                 at('Source has an empty item')
             elif len(non_empty) > 1:
@@ -999,7 +1036,7 @@ def parse_fields(ruling, body, err):
             elif is_glob(non_empty[0]):
                 at('Source must be a file, not a glob')
             elif not SOURCE_RE.search(non_empty[0]):
-                at('Source must be a file in docs/statements/')
+                at('Source must be a file in docs/owner-words/')
             else:
                 ruling['source'] = non_empty[0]
         else:
@@ -1130,14 +1167,14 @@ def _mentions(full, rx, length):
 def read_docs(root, today, errors):
     """
     Reads the schema and parses every area doc and every history file
-    (docs/history/*.md); touches nothing else (never docs/statements/).
+    (docs/history/*.md); touches nothing else (never docs/owner-words/).
     Returns (schema, doc_files, history_files, rulings, markers); problems go
     to `errors`.
     """
     rulings = []
     markers = []
 
-    schema = read_schema(root, errors)
+    schema = read_schema(root, errors, today)
     areas = schema['areas'] if schema else {}
     docs_with_area = {d for d in areas.values() if isinstance(d, str)}
 
@@ -1205,11 +1242,13 @@ def check_doc_rules(schema, rulings, markers, today, errors):
     """
     The checks the docs alone settle, with no file tree: rule 1 (unique IDs),
     rule 2 (Replaces and Replaced markers link both ways), rule 4 (dates),
-    rule 5 (known area, right doc) and where a ruling sits (in force in the
-    area doc, replaced in its history file). Used by the full check and by
-    lookups. Errors point to the file a ruling sits in.
+    rule 5 (known area, right doc), where a ruling sits (in force in the
+    area doc, replaced in its history file) and owner quotes (x-quotes-since).
+    Used by the full check and by lookups. Errors point to the file a ruling
+    sits in.
     """
     areas = schema['areas'] if schema else {}
+    quotes_since = schema['quotesSince'] if schema else None
     by_id = {}
     for r in rulings:
         def at(message, r=r):
@@ -1250,6 +1289,15 @@ def check_doc_rules(schema, rulings, markers, today, errors):
             elif 'replacedBy' not in r and in_history:
                 at('ruling in history has no Replaced marker; rulings in force belong in %s' % r['doc'])
 
+        # Owner quotes: from x-quotes-since on, the decision and Why are the
+        # owner's exact words in quotes. An empty decision is reported already.
+        if quotes_since and r['date'] >= quotes_since:
+            if r['decision'] and not is_quoted(r['decision']):
+                at("decision must be the owner's exact words in quotes (required for rulings dated from %s)"
+                   % quotes_since)
+            if 'why' in r and not is_quoted(r['why']):
+                at("Why must be the owner's exact words in quotes")
+
     # Rule 2: Replaces and Replaced markers link both ways.
     for r in rulings:
         for old in r.get('replaces') or []:
@@ -1282,7 +1330,8 @@ def check_rulings(root=None, now=None):
     Checks the rulings in the repo at `root` (default: current directory).
     `now` (an aware datetime) replaces the current time (for tests).
     Returns {'rulings': [...], 'errors': [{file, line, id, message}], 'docCount': int,
-    'historyCount': int, 'notes': [{file, line, id, message}],
+    'historyCount': int, 'schemaNotes': [{file, line, id, message}] (the
+    x-quotes-since note), 'notes': [{file, line, id, message}],
     'enforcement': {tested, review, unenforced, inForce}}.
     """
     root = _resolve(os.getcwd() if root is None else os.fspath(root))
@@ -1319,7 +1368,7 @@ def check_rulings(root=None, now=None):
     # hyphens). A ruling counts as tested only if none of its Tests items fail.
     # Replaced rulings are skipped: history is never reworded, so it must not
     # fail when the code it named moves. Their Source is still checked.
-    real_statements = os.path.join(real_root, 'docs', 'statements')
+    real_owner_words = os.path.join(real_root, 'docs', 'owner-words')
     failed_tests = set()
     for r in rulings:
         def at(message, r=r):
@@ -1345,17 +1394,17 @@ def check_rulings(root=None, now=None):
                 if field == 'tests' and len(errors) > n_before:
                     failed_tests.add(id(r))
 
-        # Source: the owner's words, in a file in docs/statements/ that
+        # Source: the owner's words, in a file in docs/owner-words/ that
         # mentions the ruling's ID like a Tests file does. Never affects coverage.
         if 'source' in r:
             item = r['source']
             found = check_path_item(root, real_root, item, 'source', get_files, at, label='Source')
-            if found is not None and not _strictly_inside(real_statements, found[0]):
-                at('Source "%s" must resolve to a file in docs/statements/' % item)
+            if found is not None and not _strictly_inside(real_owner_words, found[0]):
+                at('Source "%s" must resolve to a file in docs/owner-words/' % item)
             elif found is not None:
                 state = _mentions(found[0], id_mention_regexp(r['id']), len(r['id']))
                 if state == 'dir':
-                    at('Source "%s" is a directory; list a file in docs/statements/' % item)
+                    at('Source "%s" is a directory; list a file in docs/owner-words/' % item)
                 elif state == 'unreadable':
                     at('Source "%s" could not be read' % item)
                 elif state == 'no':
@@ -1383,8 +1432,13 @@ def check_rulings(root=None, now=None):
                 continue  # its failing Tests items are already reported as errors
             notes.append({'file': r['file'], 'line': r['line'], 'id': r['id'],
                           'message': 'note: not enforced; add Tests or Enforced: review'})
+    # Not an error: without x-quotes-since, owner quotes are not checked.
+    schema_notes = []
+    if schema and not schema['quotesSinceSet']:
+        schema_notes.append({'file': SCHEMA_PATH, 'line': None, 'id': '-', 'message': QUOTES_SINCE_NOTE})
     return {'rulings': [to_schema_shape(r) for r in rulings], 'errors': errors, 'docCount': len(doc_files),
-            'historyCount': len(history_files), 'notes': notes, 'enforcement': counts}
+            'historyCount': len(history_files), 'schemaNotes': schema_notes, 'notes': notes,
+            'enforcement': counts}
 
 
 def _strictly_inside(real_dir, full):
@@ -1487,7 +1541,7 @@ def lookup_rulings(root=None, for_paths=None, area=None, rid=None, now=None):
     Pass exactly one of for_paths (a list), area or rid. --for and --area pick
     rulings in force (in an area doc and not replaced), of any kind (Parked
     and Asked too); --id finds any ruling, including those in history files. Never reads
-    docs/statements/. Returns {'groups': [(label, [rulings])], 'rulings': [...],
+    docs/owner-words/. Returns {'groups': [(label, [rulings])], 'rulings': [...],
     'problems': int}, rulings in schema shape ordered by area doc, then file
     (the area doc before its history file), then line. Raises UsageError.
     """
@@ -1675,6 +1729,7 @@ def main(argv):
     result = check_rulings(root)
     report = '\n'.join(
         [format_error(e) for e in result['errors']]
+        + [format_error(n) for n in result['schemaNotes']]
         + [format_error(n) for n in result['notes']]
         + [enforcement_line(result), summary(result)]
     ) + '\n'

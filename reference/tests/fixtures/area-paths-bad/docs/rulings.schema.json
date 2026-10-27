@@ -112,7 +112,7 @@
     },
     "source": {
       "type": "string",
-      "pattern": "^docs/statements/[^/]+\\.md$"
+      "pattern": "^docs/owner-words/[^/]+\\.md$"
     }
   },
   "$defs": {

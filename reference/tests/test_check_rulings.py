@@ -74,6 +74,8 @@ FAILURES = {
         'docs/development.md:3  R-DEV-001  unknown field "**paths:**"',
         'docs/development.md:3  R-DEV-001  unknown field "**Path:**"',
         'docs/development.md:3  R-DEV-001  unknown field "**Test:**"',
+        # Summary is not a field: rulings hold only the owner's words and facts.
+        'docs/development.md:3  R-DEV-001  unknown field "**Summary:**"',
     ],
     'lookalike-in-body': [
         'docs/development.md:3  R-DEV-7  malformed ruling ID "R-DEV-7"; expected R-AREA-NNN',
@@ -168,23 +170,23 @@ FAILURES = {
         'docs/development.md:5  R-DEV-002  Replaces R-DEV-001, but R-DEV-001 has no "Replaced → R-DEV-002" marker',
         'docs/history/development.md:3  R-DEV-001  duplicate ID; first defined at docs/development.md:3',
     ],
-    # Source: one file in docs/statements/ that mentions the ruling's ID.
+    # Source: one file in docs/owner-words/ that mentions the ruling's ID.
     'source': [
-        'docs/development.md:5  R-DEV-002  Source item "docs/statements/nope.md" does not exist',
-        'docs/development.md:7  R-DEV-003  Source must be a file in docs/statements/',
+        'docs/development.md:5  R-DEV-002  Source item "docs/owner-words/nope.md" does not exist',
+        'docs/development.md:7  R-DEV-003  Source must be a file in docs/owner-words/',
         'docs/development.md:9  R-DEV-004  Source must be a file, not a glob',
         'docs/development.md:11  R-DEV-005  Source must be one file',
-        'docs/development.md:14  R-DEV-006  Source "docs/statements/other.md" does not mention R-DEV-006',
-        'docs/development.md:16  R-DEV-007  Source "docs/statements/folder.md" is a directory;'
-        ' list a file in docs/statements/',
+        'docs/development.md:14  R-DEV-006  Source "docs/owner-words/other.md" does not mention R-DEV-006',
+        'docs/development.md:16  R-DEV-007  Source "docs/owner-words/folder.md" is a directory;'
+        ' list a file in docs/owner-words/',
     ],
     # Source shapes: unquoted, empty item, `..`, a leading ./, a nested folder.
     'source-shapes': [
-        'docs/development.md:3  R-DEV-001  Source must be backtick-quoted, e.g. `docs/statements/billing.md`',
+        'docs/development.md:3  R-DEV-001  Source must be backtick-quoted, e.g. `docs/owner-words/billing.md`',
         'docs/development.md:5  R-DEV-002  Source has an empty item',
-        'docs/development.md:7  R-DEV-003  Source must be a file in docs/statements/',
-        'docs/development.md:9  R-DEV-004  Source must be a file in docs/statements/',
-        'docs/development.md:11  R-DEV-005  Source must be a file in docs/statements/',
+        'docs/development.md:7  R-DEV-003  Source must be a file in docs/owner-words/',
+        'docs/development.md:9  R-DEV-004  Source must be a file in docs/owner-words/',
+        'docs/development.md:11  R-DEV-005  Source must be a file in docs/owner-words/',
     ],
     # A marked ruling left in the area doc and an unmarked one in a history file.
     'history-misplaced': [
@@ -194,8 +196,8 @@ FAILURES = {
     ],
     # A replaced ruling's Source is still checked on disk.
     'history-source': [
-        'docs/history/development.md:3  R-DEV-001  Source item "docs/statements/nope.md" does not exist',
-        'docs/history/development.md:6  R-DEV-003  Source "docs/statements/development.md" does not mention R-DEV-003',
+        'docs/history/development.md:3  R-DEV-001  Source item "docs/owner-words/nope.md" does not exist',
+        'docs/history/development.md:6  R-DEV-003  Source "docs/owner-words/development.md" does not mention R-DEV-003',
     ],
     # History files are parsed like area docs: a marker must follow its ruling
     # directly, fenced code is skipped, lookalikes and unclosed fences are errors.
@@ -213,7 +215,30 @@ FAILURES = {
         'docs/history/billing.md:4  R-BILLING-001  Replaced → R-BILLING-002, which does not exist',
         'docs/rulings.schema.json:1  -  area BILLING: docs/billing.md does not exist',
     ],
+    # x-quotes-since: from 2026-03-01 on, decisions and Why are the owner's
+    # words in quotes, in area docs and history files alike.
+    'quotes': [
+        "docs/development.md:5  R-DEV-002  decision must be the owner's exact words in quotes"
+        ' (required for rulings dated from 2026-03-01)',
+        "docs/development.md:13  R-DEV-006  decision must be the owner's exact words in quotes"
+        ' (required for rulings dated from 2026-03-01)',
+        "docs/development.md:15  R-DEV-007  Why must be the owner's exact words in quotes",
+        # Dated exactly on x-quotes-since and unquoted: the rule applies on or after that day.
+        "docs/development.md:25  R-DEV-013  decision must be the owner's exact words in quotes"
+        ' (required for rulings dated from 2026-03-01)',
+        "docs/history/development.md:6  R-DEV-011  decision must be the owner's exact words in quotes"
+        ' (required for rulings dated from 2026-03-01)',
+    ],
+    # A bad x-quotes-since is a schema error, and no ruling is quote-checked.
+    'quotes-since-malformed': ['docs/rulings.schema.json:1  -  x-quotes-since: date "2026-3-1" is not YYYY-MM-DD'],
+    'quotes-since-impossible': [
+        'docs/rulings.schema.json:1  -  x-quotes-since: date 2026-02-30 is not a real calendar date',
+    ],
+    'quotes-since-future': ['docs/rulings.schema.json:1  -  x-quotes-since: date 2999-01-01 is in the future'],
 }
+
+
+QUOTES_NOTE = 'docs/rulings.schema.json  -  note: x-quotes-since is not set; owner quotes are not checked'
 
 
 def run_cli(*args):
@@ -326,8 +351,8 @@ class CheckRulingsTest(unittest.TestCase):
                 'file': 'docs/security.md',
                 'line': 3,
                 'decision': (
-                    "never look at secret values. No worker may see a secret's value: not in a secrets manager, "
-                    'command output, environment variables, files or logs.'
+                    '"never look at secret values. No worker may see a secret\'s value: not in a secrets manager, '
+                    'command output, environment variables, files or logs."'
                 ),
                 'covers': 'every worker.',
             },
@@ -371,6 +396,7 @@ class CheckRulingsTest(unittest.TestCase):
             )
 
         valid_report = (
+            QUOTES_NOTE + '\n'
             'docs/development.md:7  R-DEV-002  note: not enforced; add Tests or Enforced: review\n'
             'Enforcement: 0 tested, 1 review-only, 1 not enforced (of 2 in-force rulings)\n'
             '7 rulings in 2 docs (2 history files), 0 errors\n'
@@ -384,6 +410,7 @@ class CheckRulingsTest(unittest.TestCase):
         self.assertEqual(
             bad.stdout.decode('utf-8'),
             '\n'.join(FAILURES['missing-path'] + [
+                QUOTES_NOTE,
                 'Enforcement: 0 tested, 0 review-only, 1 not enforced (of 1 in-force rulings)',
                 '1 rulings in 2 docs, 2 errors', '']),
         )
@@ -475,6 +502,7 @@ class CheckRulingsTest(unittest.TestCase):
             'docs/development.md:5  R-DEV-002  Tests item "tests/nope.test.js" does not exist\n'
             'docs/development.md:7  R-DEV-003  Tests item "tests/nope.test.js" does not exist\n'
             'docs/development.md:11  R-DEV-001  duplicate ID; first defined at docs/development.md:3\n'
+            + QUOTES_NOTE + '\n'
             'docs/development.md:9  R-DEV-004  note: not enforced; add Tests or Enforced: review\n'
             'Enforcement: 1 tested, 1 review-only, 2 not enforced (of 4 in-force rulings)\n'
             '5 rulings in 2 docs, 3 errors\n'
@@ -492,7 +520,7 @@ class CheckRulingsTest(unittest.TestCase):
         out = run_cli('--root', fixture('coverage'))
         self.assertEqual(out.returncode, 0)
         self.assertEqual(out.stdout.decode('utf-8'), '\n'.join(
-            [format_error(n) for n in result['notes']]
+            [QUOTES_NOTE] + [format_error(n) for n in result['notes']]
             + ['Enforcement: 2 tested, 1 review-only, 2 not enforced (of 5 in-force rulings)',
                '7 rulings in 2 docs (1 history files), 0 errors', '']))
         js = run_cli('--root', fixture('coverage'), '--json')
@@ -528,6 +556,7 @@ class CheckRulingsTest(unittest.TestCase):
         out = run_cli('--root', fixture('history'))
         self.assertEqual(out.returncode, 0)
         self.assertEqual(out.stdout.decode('utf-8'), (
+            QUOTES_NOTE + '\n'
             'Enforcement: 0 tested, 2 review-only, 0 not enforced (of 2 in-force rulings)\n'
             '3 rulings in 2 docs (1 history files), 0 errors\n'
         ))
@@ -539,7 +568,7 @@ class CheckRulingsTest(unittest.TestCase):
         self.assertEqual((old['doc'], old['file'], old['line']), ('docs/billing.md', 'docs/history/billing.md', 3))
         self.assertEqual((new['doc'], new['file'], new['line']), ('docs/billing.md', 'docs/billing.md', 3))
         self.assertEqual(list(new.keys())[3:6], ['doc', 'file', 'line'])
-        self.assertEqual(new['source'], 'docs/statements/billing.md')
+        self.assertEqual(new['source'], 'docs/owner-words/billing.md')
         self.assertEqual(list(new.keys())[-1], 'source')
         js = run_cli('--root', fixture('history'), '--json')
         self.assertEqual(json.loads(js.stdout.decode('utf-8')), check_rulings(fixture('history'))['rulings'])
@@ -572,7 +601,7 @@ class CheckRulingsTest(unittest.TestCase):
         self.assertEqual(out.stdout.decode('utf-8'), (
             'R-BILLING-002 · Ruled 2026-06-01 · docs/billing.md:3\n'
             '  invoices are HTML.\n'
-            '  Enforced: review · Source: `docs/statements/billing.md`\n'
+            '  Enforced: review · Source: `docs/owner-words/billing.md`\n'
             '\n'
             '1 rulings in area BILLING\n'
         ))
@@ -581,9 +610,9 @@ class CheckRulingsTest(unittest.TestCase):
         """Source mentioning the ID in lower case with underscores passes and is stored"""
         result = check_rulings(fixture('source'))
         by_id = {r['id']: r for r in result['rulings']}
-        self.assertEqual(by_id['R-DEV-001']['source'], 'docs/statements/development.md')
+        self.assertEqual(by_id['R-DEV-001']['source'], 'docs/owner-words/development.md')
         self.assertNotIn('R-DEV-001', [e['id'] for e in result['errors']])
-        # Invalid Source values are not stored; statement files are not docs.
+        # Invalid Source values are not stored; owner-words files are not docs.
         for rid in ('R-DEV-003', 'R-DEV-004', 'R-DEV-005'):
             self.assertNotIn('source', by_id[rid], rid)
         self.assertEqual(result['docCount'], 2)
@@ -637,25 +666,25 @@ class CheckRulingsTest(unittest.TestCase):
             self.assertNotIn('source', by_id[rid], rid)
 
     def test_source_symlink(self):
-        """Source must resolve to a file in docs/statements/: a symlink out of it fails, one within it passes"""
+        """Source must resolve to a file in docs/owner-words/: a symlink out of it fails, one within it passes"""
         tmp = tempfile.mkdtemp(prefix='check-rulings-')
         try:
             repo = os.path.join(tmp, 'repo')
             shutil.copytree(fixture('history'), repo)
-            statement = os.path.join(repo, 'docs', 'statements', 'billing.md')
+            words = os.path.join(repo, 'docs', 'owner-words', 'billing.md')
             moved = os.path.join(repo, 'notes.md')
-            os.rename(statement, moved)
+            os.rename(words, moved)
             try:
-                os.symlink(os.path.join('..', '..', 'notes.md'), statement)
+                os.symlink(os.path.join('..', '..', 'notes.md'), words)
             except (OSError, NotImplementedError, AttributeError):
                 self.skipTest('symlinks not supported')
             self.assertEqual([format_error(e) for e in check_rulings(repo)['errors']], [
-                'docs/billing.md:3  R-BILLING-002  Source "docs/statements/billing.md" must resolve to a file'
-                ' in docs/statements/',
+                'docs/billing.md:3  R-BILLING-002  Source "docs/owner-words/billing.md" must resolve to a file'
+                ' in docs/owner-words/',
             ])
-            os.remove(statement)
-            os.rename(moved, os.path.join(repo, 'docs', 'statements', 'real.md'))
-            os.symlink('real.md', statement)
+            os.remove(words)
+            os.rename(moved, os.path.join(repo, 'docs', 'owner-words', 'real.md'))
+            os.symlink('real.md', words)
             self.assertEqual(check_rulings(repo)['errors'], [])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -847,18 +876,18 @@ class CheckRulingsTest(unittest.TestCase):
         self.assertEqual(rulings[0]['replacedBy'], {'id': 'R-BILLING-003', 'date': '2026-06-01'})
 
     def test_lookup_does_not_walk(self):
-        """lookup never lists the repo's files, checks Paths/Tests/Source on disk or reads docs/statements/"""
+        """lookup never lists the repo's files, checks Paths/Tests/Source on disk or reads docs/owner-words/"""
         def boom(*a, **k):
             raise AssertionError('lookup must not walk the repo')
 
         saved = checker.list_files, checker.check_path_item, checker._mentions
         checker.list_files = checker.check_path_item = checker._mentions = boom
-        # A test file or an owner statement must never be opened either.
+        # A test file or a file of the owner's words must never be opened either.
         real_read_text = checker._read_text
 
         def read_text(full):
             rel = '/' + os.path.relpath(full, fixture('.')).replace(os.sep, '/').split('/', 1)[-1]
-            if not rel.startswith('/docs/') or rel.startswith('/docs/statements/'):
+            if not rel.startswith('/docs/') or rel.startswith('/docs/owner-words/'):
                 raise AssertionError('lookup read %s' % full)
             return real_read_text(full)
 
@@ -871,17 +900,117 @@ class CheckRulingsTest(unittest.TestCase):
             self.assertEqual(lookup_rulings(fixture('tests-mention'), area='DEV')['problems'], 0)
             self.assertEqual(len(lookup_rulings(fixture('area-paths'), area='DEV')['rulings']), 2)
             self.assertEqual(len(lookup_rulings(fixture('area-paths'), rid='R-DEV-001')['rulings']), 1)
-            # History files are read; statement files never are.
+            # History files are read; owner-words files never are.
             history = lookup_rulings(fixture('history'), rid='R-BILLING-001')
             self.assertEqual(history['rulings'][0]['file'], 'docs/history/billing.md')
             self.assertEqual(history['problems'], 0)
             self.assertEqual(lookup_rulings(fixture('history'), area='BILLING')['rulings'][0]['source'],
-                             'docs/statements/billing.md')
+                             'docs/owner-words/billing.md')
             self.assertEqual(self.ids_for('src/billing/invoices.py', root=fixture('history')), ['R-BILLING-002'])
             self.assertEqual(len(lookup_rulings(fixture('source'), area='DEV')['rulings']), 7)
         finally:
             checker.list_files, checker.check_path_item, checker._mentions = saved
             checker._read_text = real_read_text
+
+    # --- owner quotes (x-quotes-since) ---------------------------------------
+
+    def test_is_quoted(self):
+        """quoted: starts with " or “, ends with " or ” (then one optional "."), not empty or blank"""
+        for text in ('"a"', '“a”', '"a".', '“a”.', '  "a b."  ', '"say "x" now"', '“a"', '"a”'):
+            self.assertTrue(checker.is_quoted(text), text)
+        for text in ('""', '"".', '“”', '" "', '" ".', '“ ”', '"\t"', 'a', '"a', 'a"', '"a"..', '"a" b', 'b "a"', '"', '".', ''):
+            self.assertFalse(checker.is_quoted(text), text)
+
+    def test_quotes_passes(self):
+        """x-quotes-since: quoted on the day and after, curly quotes, a trailing period, multi-line,
+        inner quotes, history files, and unquoted rulings dated before it all pass"""
+        result = check_rulings(fixture('quotes'))
+        failing = {e['id'] for e in result['errors']}
+        for rid in ('R-DEV-001', 'R-DEV-003', 'R-DEV-004', 'R-DEV-005', 'R-DEV-008', 'R-DEV-009',
+                    'R-DEV-010', 'R-DEV-012'):
+            self.assertNotIn(rid, failing, rid)
+        by_id = {r['id']: r for r in result['rulings']}
+        self.assertEqual(by_id['R-DEV-008']['decision'], '"a quote can span lines and hold "inner" quotes."')
+        self.assertEqual(by_id['R-DEV-010']['file'], 'docs/history/development.md')
+        # Setting x-quotes-since removes the note line.
+        self.assertEqual(result['schemaNotes'], [])
+        out = run_cli('--root', fixture('quotes'))
+        self.assertEqual(out.returncode, 1)
+        self.assertNotIn('x-quotes-since', out.stdout.decode('utf-8'))
+
+    def test_quotes_since_today_utc_plus_14(self):
+        """x-quotes-since equal to "today" at UTC+14 is not in the future; one day later is"""
+        # guide-example sets x-quotes-since 2026-01-15, which starts at UTC+14 at 2026-01-14T10:00Z.
+        def schema_errors(now):
+            return [format_error(e) for e in check_rulings(fixture('guide-example'), now=now)['errors']
+                    if e['file'] == 'docs/rulings.schema.json']
+
+        self.assertEqual(check_rulings(fixture('guide-example'),
+                                       now=datetime(2026, 1, 14, 10, 0, 0, 0, tzinfo=timezone.utc))['errors'], [])
+        self.assertEqual(schema_errors(datetime(2026, 1, 13, 10, 0, 0, 0, tzinfo=timezone.utc)), [
+            'docs/rulings.schema.json:1  -  x-quotes-since: date 2026-01-15 is in the future',
+        ])
+
+    def test_quotes_since_not_a_string(self):
+        """x-quotes-since that is not a string is a schema error"""
+        tmp = tempfile.mkdtemp(prefix='check-rulings-')
+        try:
+            repo = os.path.join(tmp, 'repo')
+            shutil.copytree(fixture('quotes-since-malformed'), repo)
+            path = os.path.join(repo, 'docs', 'rulings.schema.json')
+            with open(path, encoding='utf-8') as f:
+                text = f.read().replace('"x-quotes-since": "2026-3-1"', '"x-quotes-since": 20260301')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            self.assertEqual([format_error(e) for e in check_rulings(repo)['errors']], [
+                'docs/rulings.schema.json:1  -  x-quotes-since must be a YYYY-MM-DD date string, got 20260301',
+            ])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_quotes_since_note(self):
+        """without x-quotes-since: one note line, not an error; none when it is set (even if bad) or the schema is missing"""
+        result = check_rulings(fixture('valid'))
+        self.assertEqual(result['errors'], [])
+        self.assertEqual([format_error(n) for n in result['schemaNotes']], [QUOTES_NOTE])
+        self.assertNotIn(QUOTES_NOTE, [format_error(n) for n in result['notes']])
+        for name in ('quotes', 'quotes-since-malformed', 'missing-schema'):
+            self.assertEqual(check_rulings(fixture(name))['schemaNotes'], [], name)
+        # missing-path's ruling is unquoted, yet FAILURES lists no quote error for it: only the note.
+        self.assertEqual(check_rulings(fixture('missing-path'))['schemaNotes'][0]['message'],
+                         'note: x-quotes-since is not set; owner quotes are not checked')
+
+    def test_quoted_lookup_and_json(self):
+        """a multi-line quoted ruling prints its quote, then its other fields, in lookups and JSON"""
+        by_id = {r['id']: r for r in check_rulings(fixture('quotes'))['rulings']}
+        r = by_id['R-DEV-008']
+        self.assertEqual(list(r.keys()), ['id', 'kind', 'date', 'doc', 'file', 'line', 'decision',
+                                          'why', 'paths', 'enforced'])
+        self.assertEqual(checker.FIELDS[0], 'Why')
+        out = run_cli('--root', fixture('quotes'), '--for', 'src/deploy.sh')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout.decode('utf-8'), (
+            'R-DEV-008 · Ruled 2026-03-06 · docs/development.md:17\n'
+            '  "a quote can span lines and hold "inner" quotes."\n'
+            '  Why: "because I said so." · Enforced: review\n'
+            '\n'
+            '1 rulings apply to src/deploy.sh\n'
+        ))
+        js = run_cli('--root', fixture('quotes'), '--json', '--for', 'src/deploy.sh')
+        self.assertEqual(js.returncode, 0)
+        [j] = json.loads(js.stdout.decode('utf-8'))
+        self.assertEqual(j['decision'], '"a quote can span lines and hold "inner" quotes."')
+        self.assertNotIn('summary', j)
+
+    def test_lookup_warns_on_unquoted(self):
+        """lookup counts unquoted rulings on or after x-quotes-since as problems"""
+        self.assertEqual(lookup_rulings(fixture('quotes'), area='DEV')['problems'], 5)
+        out = run_cli('--root', fixture('quotes'), '--area', 'DEV')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stderr.decode('utf-8'),
+                         'warning: the rulings docs have 5 problems; run python3 scripts/check_rulings.py\n')
+        for name in ('quotes-since-malformed', 'quotes-since-impossible', 'quotes-since-future'):
+            self.assertEqual(lookup_rulings(fixture(name), area='DEV')['problems'], 1, name)
 
 
 def _make_failure_test(name, expected):
