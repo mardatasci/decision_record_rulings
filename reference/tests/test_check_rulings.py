@@ -18,7 +18,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, '..', 'scripts', 'check_rulings.py')
 sys.path.insert(0, os.path.join(HERE, '..', 'scripts'))
 
-from check_rulings import check_rulings, format_error  # noqa: E402
+import check_rulings as checker  # noqa: E402
+from check_rulings import check_rulings, format_error, lookup_rulings, UsageError  # noqa: E402
 
 
 def fixture(name):
@@ -109,7 +110,50 @@ FAILURES = {
     'absolute-path': ['docs/development.md:3  R-DEV-001  Paths item "/etc/hosts" points outside the repo'],
     'glob-dotdot': ['docs/development.md:3  R-DEV-001  Paths item "src/../../*.js" points outside the repo'],
     'missing-schema': ['docs/rulings.schema.json:1  -  schema file not found'],
+    'enforced': [
+        'docs/development.md:5  R-DEV-002  Enforced must start with "review"; link a test with Tests instead',
+        'docs/development.md:7  R-DEV-003  Enforced must start with "review"; link a test with Tests instead',
+    ],
+    # Tests files must mention the ruling ID (any case, - or _ separators); a
+    # glob needs one matching file outside docs/ that does; a directory or a
+    # file in docs/ never counts; R-DEV-0080 does not mention R-DEV-008.
+    'tests-mention': [
+        'docs/development.md:7  R-DEV-003  Tests item "tests/other.test.js" does not mention R-DEV-003'
+        ' (any case, - or _ separators, e.g. R_DEV_003)',
+        'docs/development.md:11  R-DEV-005  Tests item "tests/glob/*.test.js" does not mention R-DEV-005'
+        ' (any case, - or _ separators, e.g. R_DEV_005)',
+        'docs/development.md:13  R-DEV-006  Tests item "tests/glob" is a directory; list test files',
+        'docs/development.md:17  R-DEV-008  Tests item "tests/longer.test.js" does not mention R-DEV-008'
+        ' (any case, - or _ separators, e.g. R_DEV_008)',
+        'docs/development.md:19  R-DEV-009  Tests item "docs/billing.md" points into docs/; list a test file',
+        'docs/development.md:21  R-DEV-010  Tests item "docs/*.md" points into docs/; list a test file',
+        'docs/development.md:23  R-DEV-011  Tests item "**/mixed.txt" does not mention R-DEV-011'
+        ' (any case, - or _ separators, e.g. R_DEV_011)',
+    ],
+    'area-paths-bad': [
+        'docs/rulings.schema.json:1  -  x-area-paths: area FOO is not in x-areas',
+        'docs/rulings.schema.json:1  -  x-area-paths: area DEV must map to a non-empty list of non-empty strings',
+        'docs/rulings.schema.json:1  -  x-area-paths BILLING item "app/nope.py" does not exist',
+        'docs/rulings.schema.json:1  -  x-area-paths BILLING glob "lib/**/*.rb" matches no files',
+    ],
+    'area-paths-nonobject': [
+        'docs/rulings.schema.json:1  -  x-area-paths must be an object mapping areas to lists of paths',
+    ],
+    'area-paths-items': [
+        'docs/rulings.schema.json:1  -  x-area-paths BILLING item "/etc/hosts" points outside the repo',
+        'docs/rulings.schema.json:1  -  x-area-paths BILLING item "../valid/docs" points outside the repo',
+        'docs/rulings.schema.json:1  -  x-area-paths BILLING glob "src/{a,b}/*.py" uses unsupported glob syntax'
+        ' ({} and [] are not supported)',
+    ],
+    'replaced-dangling': ['docs/development.md:4  R-DEV-001  Replaced → R-DEV-009, which does not exist'],
 }
+
+
+def run_cli(*args):
+    return subprocess.run(
+        [sys.executable, SCRIPT] + list(args),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
 
 
 class CheckRulingsTest(unittest.TestCase):
@@ -251,21 +295,367 @@ class CheckRulingsTest(unittest.TestCase):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
 
+        valid_report = (
+            'docs/development.md:11  R-DEV-002  note: not enforced; add Tests or Enforced: review\n'
+            'Enforcement: 0 tested, 1 review-only, 1 not enforced (of 2 in-force rulings)\n'
+            '7 rulings in 2 docs, 0 errors\n'
+        )
         ok = run('--root', fixture('valid'))
         self.assertEqual(ok.returncode, 0)
-        self.assertEqual(ok.stdout.decode('utf-8'), '7 rulings in 2 docs, 0 errors\n')
+        self.assertEqual(ok.stdout.decode('utf-8'), valid_report)
 
         bad = run('--root', fixture('missing-path'))
         self.assertEqual(bad.returncode, 1)
         self.assertEqual(
             bad.stdout.decode('utf-8'),
-            '\n'.join(FAILURES['missing-path'] + ['1 rulings in 2 docs, 2 errors', '']),
+            '\n'.join(FAILURES['missing-path'] + [
+                'Enforcement: 0 tested, 0 review-only, 1 not enforced (of 1 in-force rulings)',
+                '1 rulings in 2 docs, 2 errors', '']),
         )
 
         js = run('--root', fixture('valid'), '--json')
         self.assertEqual(js.returncode, 0)
         self.assertEqual(json.loads(js.stdout.decode('utf-8')), check_rulings(fixture('valid'))['rulings'])
-        self.assertEqual(js.stderr.decode('utf-8'), '7 rulings in 2 docs, 0 errors\n')
+        self.assertEqual(js.stderr.decode('utf-8'), valid_report)
+
+    def test_enforced_field(self):
+        """Enforced: review (any case) is stored; other values are errors and count as not enforced"""
+        result = check_rulings(fixture('enforced'))
+        by_id = {r['id']: r for r in result['rulings']}
+        self.assertEqual(by_id['R-DEV-001']['enforced'], 'review — judgment call')
+        self.assertEqual(by_id['R-DEV-004']['enforced'], 'Review')
+        self.assertNotIn('R-DEV-004', [e['id'] for e in result['errors']])
+        self.assertNotIn('enforced', by_id['R-DEV-002'])
+        self.assertEqual(result['enforcement'], {'tested': 0, 'review': 2, 'unenforced': 2, 'inForce': 4})
+        self.assertEqual([n['id'] for n in result['notes']], ['R-DEV-002', 'R-DEV-003'])
+        valid = {r['id']: r for r in check_rulings(fixture('valid'))['rulings']}
+        self.assertEqual(valid['R-BILLING-003']['enforced'], 'review — judgment call')
+
+    def test_tests_mention_passes(self):
+        """Tests files mentioning the ID (hyphens or underscores, any case, or via a glob) pass"""
+        ids = [e['id'] for e in check_rulings(fixture('tests-mention'))['errors']]
+        for rid in ('R-DEV-001', 'R-DEV-002', 'R-DEV-004', 'R-DEV-007'):
+            self.assertNotIn(rid, ids)
+
+    def test_id_mention_regexp(self):
+        """ID mentions: any case, - or _, not inside a longer name or number"""
+        rx = checker.id_mention_regexp('R-X-004')
+        for text in (b'R-X-004', b'r_x_004', b'test_R_X_004_name', b'R-x_004.', b'(R-X-004)'):
+            self.assertTrue(rx.search(text), text)
+        for text in (b'R-X-0042', b'XR-X-004', b'R-X-04', b'R-XY-004', b'1R-X-004'):
+            self.assertFalse(rx.search(text), text)
+
+    def test_mentions_reads_in_chunks(self):
+        """a mention across a chunk boundary is found; one cut by a boundary is not faked"""
+        tmp = tempfile.mkdtemp(prefix='check-rulings-')
+        saved = checker._CHUNK
+        checker._CHUNK = 8
+        try:
+            rx = checker.id_mention_regexp('R-DEV-004')
+
+            def state(data):
+                path = os.path.join(tmp, 'f.txt')
+                with open(path, 'wb') as f:
+                    f.write(data)
+                return checker._mentions(path, rx, 9)
+
+            for pad in range(0, 20):
+                self.assertEqual(state(b'x' * pad + b' R-DEV-004 tail'), 'yes', pad)
+                self.assertEqual(state(b'x' * pad + b' R-DEV-0042'), 'no', pad)
+                self.assertEqual(state(b'x' * pad + b'R-DEV-004'), 'no' if pad else 'yes', pad)
+            self.assertEqual(state(b'R-DEV-004'), 'yes')
+            self.assertEqual(checker._mentions(tmp, rx, 9), 'dir')
+        finally:
+            checker._CHUNK = saved
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipIf(sys.platform == 'win32' or (hasattr(os, 'geteuid') and os.geteuid() == 0),
+                     'file permissions')
+    def test_tests_item_unreadable(self):
+        """an unreadable Tests file gets its own message"""
+        tmp = tempfile.mkdtemp(prefix='check-rulings-')
+        try:
+            repo = os.path.join(tmp, 'repo')
+            shutil.copytree(fixture('tests-mention'), repo)
+            target = os.path.join(repo, 'tests', 'hyphen.test.js')
+            os.chmod(target, 0)
+            try:
+                lines = [format_error(e) for e in check_rulings(repo)['errors']]
+            finally:
+                os.chmod(target, 0o644)
+            self.assertIn('docs/development.md:3  R-DEV-001  Tests item "tests/hyphen.test.js" could not be read', lines)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_coverage_with_failing_tests(self):
+        """coverage: failing Tests do not count as tested; a duplicate ID counts once"""
+        result = check_rulings(fixture('coverage-failing'))
+        # R-DEV-001 tested; -002 (Tests fail) not enforced; -003 (one Tests item
+        # fails, Enforced: review) review-only; -004 not enforced; the second
+        # R-DEV-001 is a duplicate and not counted again.
+        self.assertEqual(result['enforcement'], {'tested': 1, 'review': 1, 'unenforced': 2, 'inForce': 4})
+        out = run_cli('--root', fixture('coverage-failing'))
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(out.stdout.decode('utf-8'), (
+            'docs/development.md:5  R-DEV-002  Tests item "tests/nope.test.js" does not exist\n'
+            'docs/development.md:7  R-DEV-003  Tests item "tests/nope.test.js" does not exist\n'
+            'docs/development.md:11  R-DEV-001  duplicate ID; first defined at docs/development.md:3\n'
+            'docs/development.md:9  R-DEV-004  note: not enforced; add Tests or Enforced: review\n'
+            'Enforcement: 1 tested, 1 review-only, 2 not enforced (of 4 in-force rulings)\n'
+            '5 rulings in 2 docs, 3 errors\n'
+        ))
+
+    def test_enforcement_coverage(self):
+        """coverage: counts and notes for in-force rulings; notes are not errors"""
+        result = check_rulings(fixture('coverage'))
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(result['enforcement'], {'tested': 2, 'review': 1, 'unenforced': 2, 'inForce': 5})
+        self.assertEqual([format_error(n) for n in result['notes']], [
+            'docs/development.md:9  R-DEV-004  note: not enforced; add Tests or Enforced: review',
+            'docs/development.md:14  R-DEV-006  note: not enforced; add Tests or Enforced: review',
+        ])
+        out = run_cli('--root', fixture('coverage'))
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout.decode('utf-8'), '\n'.join(
+            [format_error(n) for n in result['notes']]
+            + ['Enforcement: 2 tested, 1 review-only, 2 not enforced (of 5 in-force rulings)',
+               '7 rulings in 2 docs, 0 errors', '']))
+        js = run_cli('--root', fixture('coverage'), '--json')
+        self.assertEqual(js.returncode, 0)
+        self.assertIn('note: not enforced', js.stderr.decode('utf-8'))
+        self.assertNotIn('note:', js.stdout.decode('utf-8'))
+
+    def test_guide_example_note(self):
+        """the guide's example has no Tests/Enforced: a note, not an error"""
+        result = check_rulings(fixture('guide-example'))
+        self.assertEqual(result['errors'], [])
+        self.assertEqual([n['id'] for n in result['notes']], ['R-SECURITY-001'])
+
+    def test_rulings_md_skipped(self):
+        """docs/RULINGS.md is skipped like docs/README.md"""
+        result = check_rulings(fixture('rulings-md'))
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(result['docCount'], 2)
+        self.assertEqual([r['id'] for r in result['rulings']], ['R-DEV-001'])
+
+    def test_area_paths_valid(self):
+        """x-area-paths with existing files and a matching glob -> 0 errors"""
+        self.assertEqual(check_rulings(fixture('area-paths'))['errors'], [])
+
+    # --- lookup -------------------------------------------------------------
+
+    def ids_for(self, *paths, **kw):
+        root = kw.pop('root', fixture('area-paths'))
+        return [r['id'] for r in lookup_rulings(root, for_paths=list(paths))['rulings']]
+
+    def test_lookup_for_exact_path(self):
+        """--for: exact Paths item"""
+        self.assertEqual(self.ids_for('scripts/deploy.sh'), ['R-DEV-002'])
+        self.assertEqual(self.ids_for('./scripts\\deploy.sh'), ['R-DEV-002'])
+
+    def test_lookup_for_dir_glob_area(self):
+        """--for: directory prefix, globs and x-area-paths; replaced excluded, every kind included"""
+        # R-BILLING-002 by directory (and area), -003 and -004 (Parked) by area,
+        # -005 (Asked) by glob and area, R-DEV-001 by glob. -001 is replaced.
+        self.assertEqual(self.ids_for('src/billing/rates.py'),
+                         ['R-BILLING-002', 'R-BILLING-003', 'R-BILLING-004', 'R-BILLING-005', 'R-DEV-001'])
+        # A trailing slash is dropped: the folder itself matches the `src/billing/`
+        # Paths item but not the `src/billing/**` glob, which needs a file under it.
+        self.assertEqual(self.ids_for('src/billing/'), ['R-BILLING-002'])
+        self.assertEqual(self.ids_for('src/billing/'), self.ids_for('src/billing'))
+        self.assertEqual(self.ids_for('src/main.py'), ['R-DEV-001'])
+
+    def test_lookup_for_replaced_excluded(self):
+        """--for: a replaced ruling whose Paths match is excluded"""
+        # app/invoices.py is in R-BILLING-001 (replaced) and -003 Paths, and in
+        # BILLING's x-area-paths (brings in -002, -004 and -005).
+        self.assertEqual(self.ids_for('app/invoices.py'),
+                         ['R-BILLING-002', 'R-BILLING-003', 'R-BILLING-004', 'R-BILLING-005'])
+
+    def test_lookup_for_absolute_path(self):
+        """--for: an absolute path inside root is made relative; outside is a usage error"""
+        self.assertEqual(self.ids_for(os.path.join(fixture('area-paths'), 'src', 'main.py')), ['R-DEV-001'])
+        with self.assertRaises(UsageError) as cm:
+            self.ids_for(os.path.join(fixture('valid'), 'src', 'app.js'))
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_lookup_area(self):
+        """--area: every non-replaced ruling in the area, of any kind"""
+        result = lookup_rulings(fixture('area-paths'), area='BILLING')
+        self.assertEqual([r['id'] for r in result['rulings']],
+                         ['R-BILLING-002', 'R-BILLING-003', 'R-BILLING-004', 'R-BILLING-005'])
+        out = run_cli('--root', fixture('area-paths'), '--area', 'NOPE')
+        self.assertEqual(out.returncode, 2)
+
+    def test_lookup_id_replaced(self):
+        """--id: shows a replaced ruling with its Replaced line"""
+        out = run_cli('--root', fixture('area-paths'), '--id', 'R-BILLING-001')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout.decode('utf-8'), (
+            'R-BILLING-001 · Ruled 2026-02-01 · docs/billing.md:3\n'
+            '  invoices are PDFs.\n'
+            '  Enforced: review\n'
+            '  Replaced 2026-06-01 → R-BILLING-003\n'
+        ))
+        self.assertEqual(out.stderr.decode('utf-8'), '')
+        self.assertEqual(run_cli('--root', fixture('area-paths'), '--id', 'R-BILLING-099').returncode, 1)
+
+    def test_lookup_cli_text_and_json(self):
+        """--for text output (grouped per path) and --json"""
+        out = run_cli('--root', fixture('area-paths'), '--for', 'scripts/deploy.sh', '--for', 'src/main.py')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout.decode('utf-8'), (
+            'R-DEV-002 · Ruled 2026-01-11 · docs/development.md:6\n'
+            '  deploys go through the script.\n'
+            '  Why: it runs the checks. · Covers: every worker.\n'
+            '\n'
+            '1 rulings apply to scripts/deploy.sh\n'
+            '\n'
+            'R-DEV-001 · Ruled 2026-01-10 · docs/development.md:3\n'
+            '  type-check all Python.\n'
+            '  Tests: `tests/dev_spec.py`\n'
+            '\n'
+            '1 rulings apply to src/main.py\n'
+        ))
+        js = run_cli('--root', fixture('area-paths'), '--json', '--for', 'src/main.py')
+        self.assertEqual(js.returncode, 0)
+        self.assertEqual([r['id'] for r in json.loads(js.stdout.decode('utf-8'))], ['R-DEV-001'])
+
+    def test_lookup_combined_usage_error(self):
+        """combining --for, --area, --id is a usage error"""
+        out = run_cli('--root', fixture('area-paths'), '--for', 'src/main.py', '--area', 'BILLING')
+        self.assertEqual(out.returncode, 2)
+        self.assertEqual(out.stdout.decode('utf-8'), '')
+        self.assertEqual(run_cli('--root', fixture('area-paths'), '--id', 'R-DEV-001', '--area', 'DEV').returncode, 2)
+
+    def test_lookup_warns_on_problems(self):
+        """lookup prints a warning when the docs have problems, still exits 0"""
+        out = run_cli('--root', fixture('malformed-id'), '--area', 'DEV')
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stderr.decode('utf-8'),
+                         'warning: the rulings docs have 1 problems; run python3 scripts/check_rulings.py\n')
+
+    def test_lookup_warns_on_cross_ruling_problems(self):
+        """lookup warns about a dangling Replaced marker and a duplicate ID"""
+        warning = 'warning: the rulings docs have 1 problems; run python3 scripts/check_rulings.py\n'
+        for name, args in (('replaced-dangling', ('--id', 'R-DEV-002')), ('duplicate-id', ('--area', 'DEV'))):
+            out = run_cli('--root', fixture(name), *args)
+            self.assertEqual(out.returncode, 0, name)
+            self.assertEqual(out.stderr.decode('utf-8'), warning, name)
+            self.assertNotEqual(out.stdout.decode('utf-8'), '', name)
+
+    def test_lookup_no_rulings_found(self):
+        """lookup with no schema or no docs/ at the root is an error (exit 2), not a silent "0 rulings apply"."""
+        for root in (fixture('missing-schema'), fixture('missing-docs'), os.path.join(fixture('valid'), 'src')):
+            out = run_cli('--root', root, '--for', 'src/app.js')
+            self.assertEqual(out.returncode, 2, root)
+            self.assertEqual(out.stdout.decode('utf-8'), '', root)
+            self.assertEqual(out.stderr.decode('utf-8'), (
+                'error: no rulings found at %s (missing or unreadable docs/rulings.schema.json, or missing docs/);'
+                ' run from the repo root or pass --root\n' % os.path.abspath(root)), root)
+        # A schema that is invalid JSON or not an object is the same error, not a traceback.
+        for text in ('{not json', 'null'):
+            with tempfile.TemporaryDirectory() as tmp:
+                os.mkdir(os.path.join(tmp, 'docs'))
+                with open(os.path.join(tmp, 'docs', 'rulings.schema.json'), 'w', encoding='utf-8') as f:
+                    f.write(text)
+                out = run_cli('--root', tmp, '--for', 'src/app.js')
+                self.assertEqual(out.returncode, 2, text)
+                self.assertEqual(out.stdout.decode('utf-8'), '', text)
+                err = out.stderr.decode('utf-8')
+                self.assertNotIn('Traceback', err, text)
+                self.assertEqual(err, (
+                    'error: no rulings found at %s (missing or unreadable docs/rulings.schema.json, or missing docs/);'
+                    ' run from the repo root or pass --root\n' % os.path.abspath(tmp)), text)
+        # The default root is the current directory.
+        out = subprocess.run([sys.executable, os.path.abspath(SCRIPT), '--area', 'DEV'],
+                             cwd=fixture('missing-docs'), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn('error: no rulings found at ', out.stderr.decode('utf-8'))
+        ok = subprocess.run([sys.executable, os.path.abspath(SCRIPT), '--area', 'DEV'],
+                            cwd=fixture('area-paths'), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(ok.returncode, 0)
+
+    def test_lookup_for_paths(self):
+        """--for: `..` escaping the root, a missing value, and a `.` item"""
+        with self.assertRaises(UsageError) as cm:
+            self.ids_for('src/../../valid/src/app.js')
+        self.assertEqual(cm.exception.code, 2)
+        out = run_cli('--root', fixture('area-paths'), '--for', '../valid/src/app.js')
+        self.assertEqual(out.returncode, 2)
+        self.assertIn('is outside the repo root', out.stderr.decode('utf-8'))
+        out = run_cli('--root', fixture('area-paths'), '--for')
+        self.assertEqual(out.returncode, 2)
+        self.assertEqual(out.stdout.decode('utf-8'), '')
+        self.assertTrue(out.stderr.decode('utf-8').startswith('--for needs a value\n'))
+        for item in ('.', './'):
+            self.assertTrue(checker.item_matches(item, 'any/file.py'), item)
+            self.assertTrue(checker.item_matches(item, 'top.py'), item)
+        self.assertFalse(checker.item_matches('src', 'srcx/a.py'))
+        # Items the full check rejects never match in a lookup, and never crash it.
+        for item in ('/etc/hosts', '../valid/docs', 'src/{a,b}/*.py', 'src\\a.py'):
+            self.assertFalse(checker.item_matches(item, 'src/a.py'), item)
+        self.assertEqual(self.ids_for('src/a.py', root=fixture('area-paths-items')), ['R-BILLING-001'])
+        self.assertEqual(self.ids_for('src/a.py', root=fixture('area-paths-nonobject')), [])
+
+    @unittest.skipIf(sys.platform == 'win32', 'symlinks')
+    def test_lookup_for_absolute_through_symlink(self):
+        """--for: an absolute path in the real form of a symlinked root, and the reverse"""
+        tmp = tempfile.mkdtemp(prefix='check-rulings-')
+        try:
+            real_tmp = os.path.realpath(tmp)
+            os.symlink(real_tmp, os.path.join(real_tmp, 'link'))
+            shutil.copytree(fixture('area-paths'), os.path.join(real_tmp, 'repo'))
+            linked = os.path.join(real_tmp, 'link', 'repo')
+            real = os.path.join(real_tmp, 'repo')
+            self.assertNotEqual(linked, os.path.realpath(linked))
+            for root, base in ((linked, real), (real, linked)):
+                self.assertEqual(self.ids_for(os.path.join(base, 'src', 'main.py'), root=root), ['R-DEV-001'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_lookup_json_area_and_id(self):
+        """--json with --area and with --id"""
+        js = run_cli('--root', fixture('area-paths'), '--json', '--area', 'BILLING')
+        self.assertEqual(js.returncode, 0)
+        self.assertEqual(json.loads(js.stdout.decode('utf-8')),
+                         lookup_rulings(fixture('area-paths'), area='BILLING')['rulings'])
+        self.assertEqual([r['kind'] for r in json.loads(js.stdout.decode('utf-8'))],
+                         ['ruled', 'ruled', 'parked', 'asked'])
+        js = run_cli('--root', fixture('area-paths'), '--json', '--id', 'R-BILLING-001')
+        self.assertEqual(js.returncode, 0)
+        rulings = json.loads(js.stdout.decode('utf-8'))
+        self.assertEqual([r['id'] for r in rulings], ['R-BILLING-001'])
+        self.assertEqual(rulings[0]['replacedBy'], {'id': 'R-BILLING-003', 'date': '2026-06-01'})
+
+    def test_lookup_does_not_walk(self):
+        """lookup never lists the repo's files or checks Paths/Tests on disk"""
+        def boom(*a, **k):
+            raise AssertionError('lookup must not walk the repo')
+
+        saved = checker.list_files, checker.check_path_item, checker._mentions
+        checker.list_files = checker.check_path_item = checker._mentions = boom
+        # A test file must never be opened either.
+        real_read_text = checker._read_text
+
+        def read_text(full):
+            rel = os.path.relpath(full, fixture('.')).replace(os.sep, '/')
+            if '/docs/' not in '/' + rel.split('/', 1)[-1]:
+                raise AssertionError('lookup read %s' % full)
+            return real_read_text(full)
+
+        checker._read_text = read_text
+        try:
+            self.assertEqual(self.ids_for('src/billing/sub/tax.py'),
+                             ['R-BILLING-002', 'R-BILLING-003', 'R-BILLING-004', 'R-BILLING-005', 'R-DEV-001'])
+            # The doc-only checks still run, without the file tree.
+            self.assertEqual(lookup_rulings(fixture('replaced-dangling'), area='DEV')['problems'], 1)
+            self.assertEqual(lookup_rulings(fixture('tests-mention'), area='DEV')['problems'], 0)
+            self.assertEqual(len(lookup_rulings(fixture('area-paths'), area='DEV')['rulings']), 2)
+            self.assertEqual(len(lookup_rulings(fixture('area-paths'), rid='R-DEV-001')['rulings']), 1)
+        finally:
+            checker.list_files, checker.check_path_item, checker._mentions = saved
+            checker._read_text = real_read_text
 
 
 def _make_failure_test(name, expected):

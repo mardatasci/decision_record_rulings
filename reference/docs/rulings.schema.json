@@ -8,6 +8,7 @@
     "SECURITY": "docs/security.md",
     "UI": "docs/ui.md"
   },
+  "x-area-paths": {},
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -94,6 +95,10 @@
       "items": {
         "type": "string"
       }
+    },
+    "enforced": {
+      "type": "string",
+      "pattern": "^[Rr][Ee][Vv][Ii][Ee][Ww]\\b"
     }
   },
   "$defs": {

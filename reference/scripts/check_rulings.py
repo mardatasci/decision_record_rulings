@@ -7,6 +7,9 @@
 #
 # Usage:
 #   python3 scripts/check_rulings.py [--root <dir>] [--json]
+#   python3 scripts/check_rulings.py [--root <dir>] [--json] --for <path> [--for <path> ...]
+#   python3 scripts/check_rulings.py [--root <dir>] [--json] --area <AREA>
+#   python3 scripts/check_rulings.py [--root <dir>] [--json] --id <R-AREA-NNN>
 #
 #   --root <dir>  Repo root (default: current directory). docs/, the schema
 #                 docs/rulings.schema.json, and every Paths/Tests
@@ -15,8 +18,31 @@
 #   --json        Print the extracted rulings as a JSON array matching the
 #                 schema on stdout. Problems and the summary go to stderr.
 #
-# Prints one line per problem, `docs/x.md:LINE  R-ID  message`, then
-# `N rulings in M docs, E errors`. Exits 1 if there are errors, else 0.
+# Full check (no lookup option): prints, in this order, one line per problem,
+# `docs/x.md:LINE  R-ID  message`, then a note line for each in-force ruling
+# with neither Tests nor Enforced, then
+# `Enforcement: T tested, V review-only, U not enforced (of K in-force rulings)`
+# and `N rulings in M docs, E errors`. Notes never count as errors. A ruling
+# counts as tested only if it has Tests and none of its Tests items has an
+# error. Exits 1 if there are errors, else 0.
+#
+# Lookup (run it from the repo root, or pass --root, before editing a file; it
+# reads only the schema and docs/, never walks the repo and never checks
+# Paths/Tests on disk):
+#   --for <path>  Rulings that apply to the file: a Paths item matches it, or
+#                 it falls under the x-area-paths of the ruling's area. May
+#                 repeat; results are grouped per path. Relative paths are
+#                 taken relative to the root.
+#   --area <AREA> Every ruling in the area that has not been replaced.
+#   --id <ID>     That ruling, even if it has been replaced.
+#   --for and --area print rulings that have not been replaced, of any kind:
+#   Ruled ones bind; Parked and Asked ones are shown for context.
+#   Use one kind of lookup per call. With --json, prints the selected rulings
+#   as a JSON array. Exits 0; 1 if --id finds nothing; 2 on a usage error or
+#   when no rulings are found at the root (no docs/rulings.schema.json or
+#   docs/). If the docs have problems that the docs alone show (rules 1, 2, 4
+#   and 5, malformed rulings, the schema), a warning goes to stderr and
+#   results still print.
 #
 # Zero dependencies: Python 3.8+ standard library only.
 
@@ -31,7 +57,9 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 SCHEMA_PATH = 'docs/rulings.schema.json'
-FIELDS = ['Why', 'Covers', 'Paths', 'Replaces', 'Tests']
+FIELDS = ['Why', 'Covers', 'Paths', 'Replaces', 'Tests', 'Enforced']
+RESERVED_DOCS = ('README.md', 'RULINGS.md')  # in docs/, never area docs
+KIND_WORDS = {'ruled': 'Ruled', 'parked': 'Parked', 'asked': 'Asked'}
 KINDS = {'Ruled': 'ruled', 'Parked': 'parked', 'Asked': 'asked'}
 SKIP_DIRS = {'.git', 'node_modules'}
 
@@ -90,6 +118,7 @@ AREA_NAME_RE = re.compile(r'^[A-Z][A-Z0-9_]*\Z', _A)
 AREA_DOC_RE = re.compile(r'^docs/[^/]+\.md\Z', _A)
 PATTERN_RE = re.compile(r'^\^R-\(([A-Z0-9_|]+)\)-\[0-9\]\{3\}\$\Z', _A)
 ID_AREA_RE = re.compile(r'^R-(' + DOT + r'+)-[0-9]{3}\Z', _A)
+ENFORCED_RE = re.compile(r'^review\b', _A | re.IGNORECASE)
 LINE_SPLIT_RE = re.compile(r'\r?\n')
 SURROGATE_RE = re.compile('[\ud800-\udfff]')
 
@@ -656,7 +685,7 @@ def read_schema(root, errors):
     for area, doc in areas.items():
         if not AREA_NAME_RE.search(area):
             err('x-areas: area "%s" must be upper-case letters, digits or _' % area)
-        if not isinstance(doc, str) or not AREA_DOC_RE.search(doc) or doc == 'docs/README.md':
+        if not isinstance(doc, str) or not AREA_DOC_RE.search(doc) or doc in ['docs/' + n for n in RESERVED_DOCS]:
             err('x-areas: area %s must map to a docs/<name>.md file, got %s' % (area, js_to_string(js_stringify(doc))))
     seen_docs = set()
     for doc in area_docs:
@@ -684,7 +713,24 @@ def read_schema(root, errors):
         extra = [d for d in doc_enum if not _js_includes(area_docs, d)]
         if missing or extra:
             err('area lists disagree: properties.doc.enum %s compared with x-areas' % describe_diff(missing, extra))
-    return {'areas': areas}
+
+    # Optional x-area-paths: {AREA: [path or glob, ...]}. Items are checked
+    # against the file tree in check_rulings, not here.
+    area_paths = {}
+    raw = _js_get(schema, 'x-area-paths')
+    if raw is not UNDEFINED:
+        if not isinstance(raw, dict):
+            err('x-area-paths must be an object mapping areas to lists of paths')
+        else:
+            for area, items in raw.items():
+                if area not in areas:
+                    err('x-area-paths: area %s is not in x-areas' % area)
+                elif (not isinstance(items, list) or not items
+                        or any(not isinstance(x, str) or not x for x in items)):
+                    err('x-area-paths: area %s must map to a non-empty list of non-empty strings' % area)
+                else:
+                    area_paths[area] = items
+    return {'areas': areas, 'areaPaths': area_paths}
 
 
 def parse_doc(doc, text, errors, today):
@@ -903,6 +949,11 @@ def parse_fields(ruling, body, err):
             continue
         if name in ('Why', 'Covers'):
             ruling[name.lower()] = value
+        elif name == 'Enforced':
+            if not ENFORCED_RE.search(value):
+                at('Enforced must start with "review"; link a test with Tests instead')
+            else:
+                ruling['enforced'] = value
         elif name == 'Replaces':
             ids = [TRAILING_DOT_RE.sub('', s, count=1)
                    for s in REPLACES_SPLIT_RE.split(AND_RE.sub(' ', value.replace('`', ' ')))]
@@ -928,15 +979,19 @@ def parse_fields(ruling, body, err):
                 ruling[name.lower()] = _dedupe(non_empty) if name == 'Paths' else non_empty
 
 
-def check_path_item(root, real_root, item, field, get_files, at):
-    """Checks one Paths/Tests item against the file tree."""
-    label = 'Paths' if field == 'paths' else 'Tests'
+def check_path_item(root, real_root, item, field, get_files, at, label=None):
+    """
+    Checks one Paths/Tests item against the file tree. Returns the full paths it
+    names (the item itself, or a glob's matches) if it passed, else None.
+    """
+    if label is None:
+        label = 'Paths' if field == 'paths' else 'Tests'
     if _is_absolute(item) or DRIVE_RE.search(item):
         at('%s item "%s" points outside the repo' % (label, item))
-        return
+        return None
     if '\\' in item:
         at('%s item "%s" must use / separators' % (label, item))
-        return
+        return None
 
     # Follows symlinks: an item inside the repo may still point outside it.
     def real_outside(full):
@@ -948,33 +1003,99 @@ def check_path_item(root, real_root, item, field, get_files, at):
     resolved = _resolve(root, item)
     if _is_outside(root, resolved):
         at('%s item "%s" points outside the repo' % (label, item))
-        return
+        return None
+    # Tests must be test files; docs/ (where the rulings live) never counts.
+    in_docs_msg = 'Tests item "%s" points into docs/; list a test file' % item
+    if field == 'tests' and not is_glob(item) and _in_docs(re.sub(r'^\./', '', item, count=1)):
+        at(in_docs_msg)
+        return None
     if is_glob(item):
         if GLOB_UNSUPPORTED_RE.search(item):
             at('%s glob "%s" uses unsupported glob syntax ({} and [] are not supported)' % (label, item))
-            return
+            return None
         rx = glob_to_regexp(posix_normalize(re.sub(r'^\./', '', item, count=1)))
         matches = [f for f in get_files() if rx.search(_utf16_units(f))]
         if not matches:
             at('%s glob "%s" matches no files' % (label, item))
+            return None
+        if field == 'tests':
+            matches = [f for f in matches if not _in_docs(f)]
+            if not matches:
+                at(in_docs_msg)
+                return None
+        ok = True
         for f in matches:
             if real_outside(os.path.join(root, f)):
                 at('%s glob "%s" matches "%s", which points outside the repo' % (label, item, f))
+                ok = False
+        return [os.path.join(root, f) for f in matches] if ok else None
     elif not os.path.exists(resolved):
         at('%s item "%s" does not exist' % (label, item))
     elif real_outside(resolved):
         at('%s item "%s" points outside the repo' % (label, item))
+    else:
+        return [resolved]
+    return None
 
 
-def check_rulings(root=None, now=None):
+def _in_docs(rel):
+    """True if a root-relative posix path is docs/ or inside it."""
+    p = posix_normalize(rel) if rel else '.'
+    return p == 'docs' or p.startswith('docs/')
+
+
+def id_mention_regexp(rid):
     """
-    Checks the rulings in the repo at `root` (default: current directory).
-    `now` (an aware datetime) replaces the current time (for tests).
-    Returns {'rulings': [...], 'errors': [{file, line, id, message}], 'docCount': int}.
+    A bytes regex for mentions of `rid` in a test file: any case, - or _ as
+    separators, not inside a longer name or number (R-X-004 is not in R-X-0042).
     """
-    root = _resolve(os.getcwd() if root is None else os.fspath(root))
-    today = latest_today(now)
-    errors = []
+    m = re.match(r'^R-(.+)-([0-9]{3})\Z', rid)
+    return re.compile(
+        (r'(?<![A-Za-z0-9])R[-_]' + re.escape(m.group(1)) + r'[-_]' + m.group(2) + r'(?![0-9])').encode('utf-8'),
+        re.IGNORECASE | re.ASCII,
+    )
+
+
+_CHUNK = 1 << 16
+
+
+def _mentions(full, rx, length):
+    """
+    Whether the file at `full` mentions a ruling: 'yes', 'no', 'dir' (a
+    directory) or 'unreadable'. Reads in chunks; `length` is the length of a
+    match, and the last length + 1 bytes are kept between chunks.
+    """
+    if os.path.isdir(full):
+        return 'dir'
+    keep = length + 1
+    try:
+        with open(full, 'rb') as f:
+            buf = b''
+            at_start = True
+            while True:
+                chunk = f.read(_CHUNK)
+                eof = not chunk
+                buf += chunk
+                for m in rx.finditer(buf):
+                    # A match at the very start lacks the byte before it, and one
+                    # at the very end the byte after it, unless that is the file's
+                    # start or end. Kept bytes bring such matches back next time.
+                    if (m.start() > 0 or at_start) and (m.end() < len(buf) or eof):
+                        return 'yes'
+                if eof:
+                    return 'no'
+                if len(buf) > keep:
+                    buf = buf[-keep:]
+                    at_start = False
+    except OSError:
+        return 'unreadable'
+
+
+def read_docs(root, today, errors):
+    """
+    Reads the schema and parses every area doc; touches nothing outside docs/.
+    Returns (schema, doc_files, rulings, markers); problems go to `errors`.
+    """
     rulings = []
     markers = []
 
@@ -987,7 +1108,7 @@ def check_rulings(root=None, now=None):
     try:
         doc_files = sorted(
             ('docs/' + name for name, e in _scandir_sorted(docs_dir)
-             if e.is_file(follow_symlinks=False) and name.endswith('.md') and name != 'README.md'),
+             if e.is_file(follow_symlinks=False) and name.endswith('.md') and name not in RESERVED_DOCS),
             key=_utf16_key,
         )
     except OSError:
@@ -1006,20 +1127,16 @@ def check_rulings(root=None, now=None):
         parsed_rulings, parsed_markers = parse_doc(doc, _read_text(os.path.join(root, doc)), errors, today)
         rulings.extend(parsed_rulings)
         markers.extend(parsed_markers)
+    return schema, doc_files, rulings, markers
 
-    files_cache = []
 
-    def get_files():
-        if not files_cache:
-            files_cache.append(list_files(root))
-        return files_cache[0]
-
-    real_root = root
-    try:
-        real_root = _realpath(root)
-    except (OSError, ValueError):
-        pass  # root does not exist; the docs/ and schema errors already say so.
-
+def check_doc_rules(schema, rulings, markers, today, errors):
+    """
+    The checks the docs alone settle, with no file tree: rule 1 (unique IDs),
+    rule 2 (Replaces and Replaced markers link both ways), rule 4 (dates) and
+    rule 5 (known area, right doc). Used by the full check and by lookups.
+    """
+    areas = schema['areas'] if schema else {}
     by_id = {}
     for r in rulings:
         def at(message, r=r):
@@ -1043,11 +1160,6 @@ def check_rulings(root=None, now=None):
             at("area %s is not in the schema's x-areas" % area)
         elif schema and not (isinstance(areas[area], str) and areas[area] == r['doc']):
             at('area %s belongs in %s, not %s' % (area, js_to_string(areas[area]), r['doc']))
-
-        # Rule 3: Paths and Tests exist, inside the repo.
-        for field in ('paths', 'tests'):
-            for item in r.get(field) or []:
-                check_path_item(root, real_root, item, field, get_files, at)
 
     # Rule 2: Replaces and Replaced markers link both ways.
     for r in rulings:
@@ -1075,8 +1187,100 @@ def check_rulings(root=None, now=None):
             errors.append({'file': ruling['doc'], 'line': line, 'id': ruling['id'],
                            'message': 'Replaced → %s, but %s does not list %s in Replaces' % (by, by, ruling['id'])})
 
+
+def check_rulings(root=None, now=None):
+    """
+    Checks the rulings in the repo at `root` (default: current directory).
+    `now` (an aware datetime) replaces the current time (for tests).
+    Returns {'rulings': [...], 'errors': [{file, line, id, message}], 'docCount': int,
+    'notes': [{file, line, id, message}], 'enforcement': {tested, review, unenforced, inForce}}.
+    """
+    root = _resolve(os.getcwd() if root is None else os.fspath(root))
+    today = latest_today(now)
+    errors = []
+    schema, doc_files, rulings, markers = read_docs(root, today, errors)
+
+    files_cache = []
+
+    def get_files():
+        if not files_cache:
+            files_cache.append(list_files(root))
+        return files_cache[0]
+
+    real_root = root
+    try:
+        real_root = _realpath(root)
+    except (OSError, ValueError):
+        pass  # root does not exist; the docs/ and schema errors already say so.
+
+    # x-area-paths items follow the same rules as Paths items.
+    for area, items in (schema['areaPaths'] if schema else {}).items():
+        def at_schema(message):
+            errors.append({'file': SCHEMA_PATH, 'line': 1, 'id': '-', 'message': message})
+
+        for item in items:
+            check_path_item(root, real_root, item, 'paths', get_files, at_schema, label='x-area-paths %s' % area)
+
+    check_doc_rules(schema, rulings, markers, today, errors)
+
+    # Rule 3: Paths and Tests exist, inside the repo. Each Tests file (or at
+    # least one file a Tests glob matches, outside docs/) must mention the
+    # ruling's ID: any case, with - or _ separators (test names cannot contain
+    # hyphens). A ruling counts as tested only if none of its Tests items fail.
+    failed_tests = set()
+    for r in rulings:
+        def at(message, r=r):
+            errors.append({'file': r['doc'], 'line': r['line'], 'id': r['id'], 'message': message})
+
+        for field in ('paths', 'tests'):
+            for item in r.get(field) or []:
+                n_before = len(errors)
+                found = check_path_item(root, real_root, item, field, get_files, at)
+                if field == 'tests' and found is not None:
+                    rx = id_mention_regexp(r['id'])
+                    states = [_mentions(f, rx, len(r['id'])) for f in found]
+                    if 'yes' in states:
+                        pass
+                    elif not is_glob(item) and states[0] == 'dir':
+                        at('Tests item "%s" is a directory; list test files' % item)
+                    elif 'unreadable' in states:
+                        at('Tests item "%s" could not be read' % item)
+                    else:
+                        alt = r['id'].replace('-', '_')
+                        at('Tests item "%s" does not mention %s (any case, - or _ separators, e.g. %s)'
+                           % (item, r['id'], alt))
+                if field == 'tests' and len(errors) > n_before:
+                    failed_tests.add(id(r))
+
     errors.sort(key=lambda e: (_utf16_key(e['file']), e['line'] if e['line'] is not None else 0))
-    return {'rulings': [to_schema_shape(r) for r in rulings], 'errors': errors, 'docCount': len(doc_files)}
+
+    # Enforcement coverage of in-force rulings (Ruled, not replaced). Never an
+    # error. Each ID counts once, even if it is (wrongly) defined twice.
+    notes = []
+    counts = {'tested': 0, 'review': 0, 'unenforced': 0, 'inForce': 0}
+    counted = set()
+    for r in rulings:
+        if not is_in_force(r) or r['id'] in counted:
+            continue
+        counted.add(r['id'])
+        counts['inForce'] += 1
+        if 'tests' in r and id(r) not in failed_tests:
+            counts['tested'] += 1
+        elif 'enforced' in r:
+            counts['review'] += 1
+        else:
+            counts['unenforced'] += 1
+            if 'tests' in r:
+                continue  # its failing Tests items are already reported as errors
+            notes.append({'file': r['doc'], 'line': r['line'], 'id': r['id'],
+                          'message': 'note: not enforced; add Tests or Enforced: review'})
+    return {'rulings': [to_schema_shape(r) for r in rulings], 'errors': errors, 'docCount': len(doc_files),
+            'notes': notes, 'enforcement': counts}
+
+
+def is_in_force(r):
+    """A Ruled ruling with no Replaced marker."""
+    return r.get('kind') == 'ruled' and 'replacedBy' not in r
 
 
 def to_schema_shape(r):
@@ -1085,10 +1289,169 @@ def to_schema_shape(r):
     if not isinstance(r['kind'], _JsFunction):  # JSON.stringify drops functions
         out['kind'] = r['kind']
     out.update({'date': r['date'], 'doc': r['doc'], 'line': r['line'], 'decision': r['decision']})
-    for k in ('why', 'covers', 'paths', 'replaces', 'replacedBy', 'tests'):
+    for k in ('why', 'covers', 'paths', 'replaces', 'replacedBy', 'tests', 'enforced'):
         if k in r:
             out[k] = r[k]
     return out
+
+
+class UsageError(Exception):
+    """A lookup that cannot run; `code` is the exit status (2 usage, 1 not found)."""
+
+    def __init__(self, message, code=2):
+        Exception.__init__(self, message)
+        self.code = code
+
+
+def normalize_lookup_path(root, p):
+    """A --for path as a posix path relative to root, or UsageError if outside it."""
+    p = p.replace('\\', '/')
+    if _is_absolute(p) or DRIVE_RE.search(p):
+        if _is_outside(root, p):
+            try:
+                real_root, real_p = os.path.realpath(root), os.path.realpath(p)
+            except (OSError, ValueError):
+                real_root = real_p = None
+            if real_root is None or _is_outside(real_root, real_p):
+                raise UsageError('--for path "%s" is outside the repo root %s' % (p, root))
+            root, p = real_root, real_p
+        try:
+            p = os.path.relpath(_resolve(p), _resolve(root)).replace(os.sep, '/')
+        except ValueError:  # Windows: another drive
+            raise UsageError('--for path "%s" is outside the repo root %s' % (p, root))
+    while p.startswith('./'):
+        p = p[2:]
+    p = posix_normalize(p) if p else '.'
+    if p == '..' or p.startswith('../'):
+        raise UsageError('--for path "%s" is outside the repo root %s' % (p, root))
+    if len(p) > 1 and p.endswith('/'):
+        p = p.rstrip('/')
+    return p
+
+
+def item_matches(item, path, _cache={}):
+    """True if a Paths/x-area-paths item covers the root-relative posix path."""
+    if '\\' in item or _is_absolute(item):
+        return False
+    it = re.sub(r'^\./', '', item, count=1)
+    if is_glob(item):
+        if GLOB_UNSUPPORTED_RE.search(item):
+            return False
+        rx = _cache.get(it)
+        if rx is None:
+            rx = _cache[it] = glob_to_regexp(posix_normalize(it))
+        return bool(rx.search(_utf16_units(path)))
+    it = posix_normalize(it).rstrip('/')
+    if it in ('', '.'):
+        return True  # `.` or `./`: the whole repo
+    return path == it or path.startswith(it + '/')
+
+
+def _area_of(r):
+    return ID_AREA_RE.search(r['id']).group(1)
+
+
+def _has_rulings(root):
+    """True if root has a docs/ folder and a readable schema that parses to a JSON object."""
+    if not os.path.isdir(os.path.join(root, 'docs')):
+        return False
+    try:
+        schema = json_parse(_read_text(os.path.join(root, SCHEMA_PATH)))
+    except (OSError, ValueError, RecursionError):
+        return False
+    return isinstance(schema, dict)
+
+
+def lookup_rulings(root=None, for_paths=None, area=None, rid=None, now=None):
+    """
+    Finds rulings without walking the repo: reads the schema and docs/ only.
+    Pass exactly one of for_paths (a list), area or rid. --for and --area pick
+    rulings that have not been replaced, of any kind (Parked and Asked too).
+    Returns {'groups': [(label, [rulings])], 'rulings': [...], 'problems': int},
+    rulings in schema shape ordered by doc then line. Raises UsageError.
+    """
+    root = _resolve(os.getcwd() if root is None else os.fspath(root))
+    if not _has_rulings(root):
+        raise UsageError('error: no rulings found at %s (missing or unreadable %s, or missing docs/); run from the repo root or pass --root'
+                         % (root, SCHEMA_PATH))
+    errors = []
+    today = latest_today(now)
+    schema, _docs, rulings, markers = read_docs(root, today, errors)
+    check_doc_rules(schema, rulings, markers, today, errors)
+    areas = schema['areas'] if schema else {}
+    area_paths = schema['areaPaths'] if schema else {}
+    rulings = sorted(rulings, key=lambda r: (_utf16_key(r['doc']), r['line']))
+    groups = []
+
+    if for_paths:
+        for raw in for_paths:
+            path = normalize_lookup_path(root, raw)
+            hit_areas = {a for a, items in area_paths.items() if any(item_matches(x, path) for x in items)}
+            picked = [
+                r for r in rulings
+                if 'replacedBy' not in r and (
+                    _area_of(r) in hit_areas
+                    or any(item_matches(x, path) for x in r.get('paths') or []))
+            ]
+            groups.append((path, picked))
+    elif area is not None:
+        if area not in areas:
+            raise UsageError('unknown area "%s"; areas in x-areas: %s' % (area, js_join(list(areas.keys()), ', ') or '(none)'))
+        groups.append((area, [r for r in rulings if _area_of(r) == area and 'replacedBy' not in r]))
+    elif rid is not None:
+        picked = [r for r in rulings if r['id'] == rid]
+        if not picked:
+            raise UsageError('no ruling %s in docs/' % rid, code=1)
+        groups.append((rid, picked))
+    else:
+        raise UsageError('no lookup given')
+
+    union = []
+    seen = set()
+    for _label, picked in groups:
+        for r in picked:
+            if id(r) not in seen:
+                seen.add(id(r))
+                union.append(r)
+    union.sort(key=lambda r: (_utf16_key(r['doc']), r['line']))
+    return {
+        'groups': [(label, [to_schema_shape(r) for r in picked]) for label, picked in groups],
+        'rulings': [to_schema_shape(r) for r in union],
+        'problems': len(errors),
+    }
+
+
+def format_ruling(r):
+    """A compact text block for one ruling (lookup output)."""
+    kind = KIND_WORDS.get(r.get('kind'), js_to_string(r.get('kind', UNDEFINED)))
+    lines = ['%s · %s %s · %s:%s' % (r['id'], kind, r['date'], r['doc'], r['line']), '  ' + r['decision']]
+    extra = []
+    if 'why' in r:
+        extra.append('Why: ' + r['why'])
+    if 'covers' in r:
+        extra.append('Covers: ' + r['covers'])
+    if 'tests' in r:
+        extra.append('Tests: ' + ', '.join('`%s`' % t for t in r['tests']))
+    if 'enforced' in r:
+        extra.append('Enforced: ' + r['enforced'])
+    if extra:
+        lines.append('  ' + ' · '.join(extra))
+    if 'replacedBy' in r:
+        lines.append('  Replaced %s → %s' % (r['replacedBy']['date'], r['replacedBy']['id']))
+    return '\n'.join(lines)
+
+
+def format_lookup(result, mode):
+    """Text output of a lookup; `mode` is 'for', 'area' or 'id'."""
+    out = []
+    for label, picked in result['groups']:
+        blocks = [format_ruling(r) for r in picked]
+        if mode == 'for':
+            blocks.append('%d rulings apply to %s' % (len(picked), label))
+        elif mode == 'area':
+            blocks.append('%d rulings in area %s' % (len(picked), label))
+        out.append('\n\n'.join(blocks))
+    return '\n\n'.join(out) + '\n' if out else ''
 
 
 def format_error(e):
@@ -1098,6 +1461,12 @@ def format_error(e):
 
 def summary(result):
     return '%d rulings in %d docs, %d errors' % (len(result['rulings']), result['docCount'], len(result['errors']))
+
+
+def enforcement_line(result):
+    c = result['enforcement']
+    return 'Enforcement: %d tested, %d review-only, %d not enforced (of %d in-force rulings)' % (
+        c['tested'], c['review'], c['unenforced'], c['inForce'])
 
 
 def _write(stream, text):
@@ -1112,9 +1481,16 @@ def _write(stream, text):
         stream.write(data.decode('utf-8'))
 
 
+USAGE = ('usage: python3 scripts/check_rulings.py [--root <dir>] [--json]'
+         ' [--for <path> ... | --area <AREA> | --id <R-AREA-NNN>]\n')
+
+
 def main(argv):
     root = os.getcwd()
     as_json = False
+    for_paths = []
+    area = None
+    rid = None
     i = 0
     while i < len(argv):
         if argv[i] == '--json':
@@ -1122,12 +1498,51 @@ def main(argv):
         elif argv[i] == '--root' and i + 1 < len(argv):
             i += 1
             root = argv[i]
+        elif argv[i] == '--for' and i + 1 < len(argv):
+            i += 1
+            for_paths.append(argv[i])
+        elif argv[i] in ('--area', '--id') and i + 1 < len(argv):
+            if (area if argv[i] == '--area' else rid) is not None:
+                _write(sys.stderr, '%s given more than once\n%s' % (argv[i], USAGE))
+                return 2
+            if argv[i] == '--area':
+                area = argv[i + 1]
+            else:
+                rid = argv[i + 1]
+            i += 1
+        elif argv[i] in ('--root', '--for', '--area', '--id'):
+            _write(sys.stderr, '%s needs a value\n%s' % (argv[i], USAGE))
+            return 2
         else:
-            _write(sys.stderr, 'unknown argument: %s\nusage: python3 scripts/check_rulings.py [--root <dir>] [--json]\n' % argv[i])
+            _write(sys.stderr, 'unknown argument: %s\n%s' % (argv[i], USAGE))
             return 2
         i += 1
+
+    modes = [m for m, on in (('for', for_paths), ('area', area is not None), ('id', rid is not None)) if on]
+    if len(modes) > 1:
+        _write(sys.stderr, 'use only one of --for, --area, --id per call\n' + USAGE)
+        return 2
+    if modes:
+        try:
+            result = lookup_rulings(root, for_paths=for_paths or None, area=area, rid=rid)
+        except UsageError as e:
+            _write(sys.stderr, '%s\n' % e)
+            return e.code
+        if result['problems']:
+            _write(sys.stderr, 'warning: the rulings docs have %d problems; run python3 scripts/check_rulings.py\n'
+                   % result['problems'])
+        if as_json:
+            _write(sys.stdout, js_stringify(result['rulings'], 2) + '\n')
+        else:
+            _write(sys.stdout, format_lookup(result, modes[0]))
+        return 0
+
     result = check_rulings(root)
-    report = '\n'.join([format_error(e) for e in result['errors']] + [summary(result)]) + '\n'
+    report = '\n'.join(
+        [format_error(e) for e in result['errors']]
+        + [format_error(n) for n in result['notes']]
+        + [enforcement_line(result), summary(result)]
+    ) + '\n'
     if as_json:
         _write(sys.stdout, js_stringify(result['rulings'], 2) + '\n')
         _write(sys.stderr, report)

@@ -6,4 +6,4 @@
   **Replaced 2026-06-01 → R-BILLING-003:** merged into one money rule.
 - **R-BILLING-003 · Ruled by owner 2026-06-01:** money is integer cents,
   rounded half to even. · **Replaces:** R-BILLING-001, R-BILLING-002
-  · **Paths:** `src/lib/money.js`
+  · **Paths:** `src/lib/money.js` · **Enforced:** review — judgment call

@@ -6,7 +6,8 @@ A **ruling** is a decision made by the project owner, written into the doc for t
 
 - **The owner decides.** Everyone else is a worker: people, Claude Code, Codex and their subagents. Workers investigate, propose, build and report. They never make or change a ruling.
 - **Rulings live in the area docs.** There's no file per decision. Read `docs/billing.md` and you get every billing rule at once.
-- **Nothing is deleted.** An overturned ruling stays in place and gets a `Replaced →` marker that points to the ruling that replaces it.
+- **Nothing is deleted.** An overturned ruling stays in place and gets a `Replaced →` marker that points to the ruling that replaces it. A ruling followed by a `Replaced →` marker is history, not in force.
+- **Rulings are enforced.** A ruling that code could break gets a test named after it; a judgment call is marked `Enforced: review` and checked in review. Before editing a file, an agent runs `python3 scripts/check_rulings.py --for <file>` to see every ruling that applies to it.
 - **A checker runs in CI.** A broken or invented ruling fails the build.
 
 A ruling looks like this:
@@ -22,8 +23,8 @@ A ruling looks like this:
 
 | File | What it is |
 |------|------------|
-| [`CLAUDE_RULINGS-GUIDE.md`](CLAUDE_RULINGS-GUIDE.md) | The full write-up for **Claude Code**: `CLAUDE.md` with `@docs/development.md`, plus a `/ruling` skill for recording new rulings. |
-| [`CODEX_RULINGS-GUIDE.md`](CODEX_RULINGS-GUIDE.md) | The same system for **Codex**: a short `AGENTS.md`, folder-level `AGENTS.md` files for high-risk folders, and the "Recording a ruling" procedure in `docs/development.md`. |
+| [`CLAUDE_RULINGS-GUIDE.md`](CLAUDE_RULINGS-GUIDE.md) | The full write-up for **Claude Code**: `CLAUDE.md` with `@docs/development.md`, plus a `/ruling` skill that follows the "Recording a ruling" procedure in `docs/RULINGS.md`. |
+| [`CODEX_RULINGS-GUIDE.md`](CODEX_RULINGS-GUIDE.md) | The same system for **Codex**: a short `AGENTS.md`, folder-level `AGENTS.md` files as a safety layer for a few high-risk folders, and the "Recording a ruling" procedure in `docs/RULINGS.md`. |
 | [`STARTER_PROMPT_CLAUDE.md`](STARTER_PROMPT_CLAUDE.md) | The prompt to paste into **Claude Code**, opened in your target repo (new or existing), to set this up one approved step at a time. It tells the agent where to find this kit. |
 | [`STARTER_PROMPT_CODEX.md`](STARTER_PROMPT_CODEX.md) | The same prompt for **Codex**. |
 | [`reference/`](reference/) | A reference checker: `scripts/check_rulings.py`, its schema, tests and sample docs. Copy it into your repo and change the area list. |
